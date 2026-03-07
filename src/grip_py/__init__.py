@@ -1,6 +1,5 @@
 """grip-py package."""
 
-from .core import version
+from .core import DuplicateGrip, Grip, GripRegistry
 
-__all__ = ["version"]
-
+__all__ = ["Grip", "GripRegistry", "DuplicateGrip"]
