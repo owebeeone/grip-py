@@ -1,0 +1,37 @@
+[build-system]
+requires = [
+    "hatchling",
+]
+build-backend = "hatchling.build"
+
+[project]
+name = "grip-py"
+version = "0.1.0"
+authors = [
+    { name = "Gianni Mariani", email = "gianni@mariani.ws" },
+]
+description = "Python runtime package scaffold for GRIP."
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU Lesser General Public License v2 or later (LGPLv2+)",
+    "Operating System :: OS Independent",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/owebeeone/grip-py"
+"Bug Tracker" = "https://github.com/owebeeone/grip-py/issues"
+
+[tool.hatch.envs.test]
+dependencies = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = [
+    "src/grip_py",
+]
+
