@@ -7,6 +7,7 @@ import inspect
 import logging
 import threading
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from typing import Generic, Literal, TypeVar
 
 T = TypeVar("T")
@@ -21,19 +22,33 @@ _SCALAR_TYPES = (type(None), bool, int, float, str, bytes)
 _LOGGER = logging.getLogger(__name__)
 
 
+@dataclass(slots=True, eq=False)
 class _AsyncSubscription(Generic[T]):
     """Internal async callback subscription state."""
 
-    __slots__ = ("fn", "queue", "task")
-
-    def __init__(self, fn: AsyncSubscriber[T]) -> None:
-        self.fn = fn
-        self.queue: asyncio.Queue[T | None] = asyncio.Queue()
-        self.task: asyncio.Task[None] | None = None
+    fn: AsyncSubscriber[T]
+    queue: asyncio.Queue[T | None] = field(default_factory=asyncio.Queue)
+    task: asyncio.Task[None] | None = None
 
 
+@dataclass(slots=True, init=False, eq=False)
 class Drip(Generic[T]):
     """Subscribable value stream with sync and queued notification modes."""
+
+    _value: T | None
+    _error_policy: ErrorPolicy
+    _elide_policy: ElidePolicy
+    _callback_error_handler: Callable[[Exception], None] | None
+    _subs: set[Subscriber[T]]
+    _priority_subs: set[Subscriber[T]]
+    _async_subs: set[_AsyncSubscription[T]]
+    _first_sub_callbacks: set[VoidCallback]
+    _zero_sub_callbacks: set[VoidCallback]
+    _enqueued: bool
+    _zero_check_scheduled: bool
+    _loop: asyncio.AbstractEventLoop | None
+    _callback_errors: list[Exception]
+    _lock: threading.RLock
 
     def __init__(
         self,

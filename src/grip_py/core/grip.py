@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Generic, Literal, TypeVar, overload
 
 from .errors import DuplicateGrip
@@ -21,11 +21,11 @@ class Grip(Generic[T]):
     data_type: type[T] | None
 
 
+@dataclass(slots=True, eq=False)
 class GripRegistry:
     """Registry for grip keys only."""
 
-    def __init__(self):
-        self._keys_by_name: dict[str, Grip[Any]] = {}
+    _keys_by_name: dict[str, Grip[Any]] = field(default_factory=dict, init=False)
 
     @overload
     def add(self, name: str, default: T) -> Grip[T]:
@@ -123,4 +123,3 @@ class GripRegistry:
         )
         self._keys_by_name[name] = grip
         return grip
-
