@@ -3,31 +3,49 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass, field
 from typing import Any
 
 from .grip import Grip
 from .interfaces import Destination, Grok, GripContext, ProducerRecord
-from .tap import Tap, TapDestinationContext
+from .tap import TapDestinationContext
 
 
 @dataclass(init=False, eq=False)
 class BaseTap(ABC):
     """Base class for concrete taps."""
 
-    provides: tuple[Grip[Any], ...]
-    _home_context: GripContext | None
-    _engine: Grok | None
-    _producer: ProducerRecord | None
+    provides: tuple[Grip[Any], ...] = field(init=False)
+    destination_param_grips: tuple[Grip[Any], ...] = field(init=False)
+    home_param_grips: tuple[Grip[Any], ...] = field(init=False)
+    _home_context: GripContext | None = field(init=False)
+    _engine: Grok | None = field(init=False)
+    _producer: ProducerRecord | None = field(init=False)
+    _home_param_values: dict[Grip[Any], Any] = field(init=False)
+    _home_param_unsubscribers: list[Callable[[], None]] = field(init=False)
+    _destination_param_values: dict[str, dict[Grip[Any], Any]] = field(init=False)
+    _destination_param_unsubscribers: dict[str, list[Callable[[], None]]] = field(init=False)
 
-    def __init__(self, *, provides: Iterable[Grip[Any]]):
+    def __init__(
+        self,
+        *,
+        provides: Iterable[Grip[Any]],
+        destination_param_grips: Iterable[Grip[Any]] | None = None,
+        home_param_grips: Iterable[Grip[Any]] | None = None,
+    ):
         self.provides: tuple[Grip[Any], ...] = tuple(provides)
         if not self.provides:
             raise ValueError("Tap must provide at least one grip")
+        self.destination_param_grips = tuple(destination_param_grips or ())
+        self.home_param_grips = tuple(home_param_grips or ())
         self._home_context: GripContext | None = None
         self._engine: Grok | None = None
         self._producer: ProducerRecord | None = None
+        self._home_param_values: dict[Grip[Any], Any] = {}
+        self._home_param_unsubscribers: list[Callable[[], None]] = []
+        self._destination_param_values: dict[str, dict[Grip[Any], Any]] = {}
+        self._destination_param_unsubscribers: dict[str, list[Callable[[], None]]] = {}
 
     def get_home_context(self) -> GripContext | None:
         return self._home_context
@@ -42,19 +60,39 @@ class BaseTap(ABC):
         self._producer = node.get_or_create_producer_record(self, self.provides)
         for grip in self.provides:
             node.record_producer(grip, self._producer)
+        self._bind_home_param_subscriptions()
 
     def on_detach(self) -> None:
+        self._clear_home_param_subscriptions()
+        self._clear_destination_param_subscriptions()
         self._home_context = None
         self._engine = None
         self._producer = None
 
     def on_connect(self, dest_context: GripContext, grip: Grip[Any]) -> None:
+        self._bind_destination_param_subscriptions(dest_context)
         # Default behavior: publish current values for destination.
         self.produce(dest_context=dest_context)
+
+    def on_disconnect(self, dest_context: GripContext, grip: Grip[Any]) -> None:
+        if self._producer is None:
+            self._clear_destination_param_subscriptions_for_context_id(dest_context.id)
+            return
+        has_destination = any(
+            node.id == dest_context.id for node in self._producer.get_destinations()
+        )
+        if not has_destination:
+            self._clear_destination_param_subscriptions_for_context_id(dest_context.id)
 
     @abstractmethod
     def produce(self, *, dest_context: GripContext | None = None) -> None:
         """Publish output values."""
+
+    def produce_on_dest_params(self, dest_context: GripContext, grip: Grip[Any]) -> None:
+        self.produce(dest_context=dest_context)
+
+    def produce_on_home_params(self, grip: Grip[Any]) -> None:
+        self.produce()
 
     def publish(self, values: dict[Grip[Any], Any], dest_context: GripContext | None = None) -> int:
         """Publish output values to destination(s)."""
@@ -74,3 +112,90 @@ class BaseTap(ABC):
 
     def create_destination_context(self, destination: Destination) -> TapDestinationContext | None:
         return None
+
+    def get_home_param_value(self, grip: Grip[Any] | None) -> Any:
+        if grip is None:
+            return None
+        return self._home_param_values.get(grip, grip.default)
+
+    def get_home_param_values(self) -> dict[Grip[Any], Any]:
+        return dict(self._home_param_values)
+
+    def get_destination_param_value(self, dest_context: GripContext, grip: Grip[Any]) -> Any:
+        return self._destination_param_values.get(dest_context.id, {}).get(grip, grip.default)
+
+    def get_destination_param_values(self, dest_context: GripContext) -> dict[Grip[Any], Any]:
+        return dict(self._destination_param_values.get(dest_context.id, {}))
+
+    def _bind_home_param_subscriptions(self) -> None:
+        if self._engine is None or self._home_context is None or not self.home_param_grips:
+            return
+        self._clear_home_param_subscriptions()
+        for grip in self.home_param_grips:
+            drip = self._engine.query(grip, self._home_context)
+            self._home_param_values[grip] = drip.get()
+
+            def on_value(value: Any, *, current_grip: Grip[Any] = grip) -> None:
+                self._home_param_values[current_grip] = value
+                self.produce_on_home_params(current_grip)
+
+            unsubscribe = self._subscribe_skip_initial(drip.subscribe_priority, on_value)
+            self._home_param_unsubscribers.append(unsubscribe)
+
+    def _clear_home_param_subscriptions(self) -> None:
+        for unsubscribe in self._home_param_unsubscribers:
+            unsubscribe()
+        self._home_param_unsubscribers.clear()
+        self._home_param_values.clear()
+
+    def _bind_destination_param_subscriptions(self, dest_context: GripContext) -> None:
+        if self._engine is None or not self.destination_param_grips:
+            return
+        if dest_context.id in self._destination_param_unsubscribers:
+            return
+
+        values: dict[Grip[Any], Any] = {}
+        unsubscribers: list[Callable[[], None]] = []
+        for grip in self.destination_param_grips:
+            drip = self._engine.query(grip, dest_context)
+            values[grip] = drip.get()
+
+            def on_value(value: Any, *, current_grip: Grip[Any] = grip, ctx: GripContext = dest_context) -> None:
+                dest_values = self._destination_param_values.setdefault(ctx.id, {})
+                dest_values[current_grip] = value
+                self.produce_on_dest_params(ctx, current_grip)
+
+            unsubscribe = self._subscribe_skip_initial(drip.subscribe_priority, on_value)
+            unsubscribers.append(unsubscribe)
+
+        self._destination_param_values[dest_context.id] = values
+        self._destination_param_unsubscribers[dest_context.id] = unsubscribers
+
+    def _clear_destination_param_subscriptions(self) -> None:
+        for unsubscribers in self._destination_param_unsubscribers.values():
+            for unsubscribe in unsubscribers:
+                unsubscribe()
+        self._destination_param_unsubscribers.clear()
+        self._destination_param_values.clear()
+
+    def _clear_destination_param_subscriptions_for_context_id(self, context_id: str) -> None:
+        unsubscribers = self._destination_param_unsubscribers.pop(context_id, ())
+        for unsubscribe in unsubscribers:
+            unsubscribe()
+        self._destination_param_values.pop(context_id, None)
+
+    @staticmethod
+    def _subscribe_skip_initial(
+        subscribe_fn: Callable[[Callable[[Any], None]], Callable[[], None]],
+        callback: Callable[[Any], None],
+    ) -> Callable[[], None]:
+        is_first = True
+
+        def wrapped(value: Any) -> None:
+            nonlocal is_first
+            if is_first:
+                is_first = False
+                return
+            callback(value)
+
+        return subscribe_fn(wrapped)

@@ -9,7 +9,7 @@ from .context import GripContext, GripContextLike
 from .drip import Drip
 from .grip import Grip, GripRegistry
 from .graph import GripContextNode, GrokGraph
-from .interfaces import Resolver, Tap, TapFactory
+from .interfaces import Resolver, Tap
 from .task_queue import TaskHandleContainer, TaskQueue
 from .tap_resolver import SimpleResolver
 
@@ -89,13 +89,6 @@ class GrokImpl:
         if parent is not None:
             ctx.add_parent(parent, priority)
         return ctx
-
-    def register_tap_at(self, ctx: GripContextLike, tap: Tap | TapFactory) -> None:
-        home_ctx = ctx.get_grip_home_context()
-        self.resolver.add_producer(home_ctx, tap)
-
-    def register_tap(self, tap: Tap | TapFactory) -> None:
-        self.register_tap_at(self.main_home_context, tap)
 
     def unregister_tap(self, tap: Tap) -> None:
         home_ctx = tap.get_home_context()

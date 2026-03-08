@@ -10,7 +10,7 @@ def test_query_returns_same_drip_for_same_context_and_grip():
     ctx = grok.main_presentation_context.create_child()
 
     tap = create_atom_value_tap(value, initial=42)
-    grok.register_tap(tap)
+    grok.main_home_context.register_tap(tap)
 
     d1 = grok.query(value, ctx)
     d2 = grok.query(value, ctx)
@@ -51,7 +51,7 @@ def test_register_unregister_re_resolves_to_fallback_provider():
     global_tap = create_atom_value_tap(out, initial=123)
     local_tap = create_atom_value_tap(out, initial=7)
 
-    grok.register_tap(global_tap)
+    grok.main_home_context.register_tap(global_tap)
     b.register_tap(local_tap)
 
     d = grok.query(out, b)
@@ -72,7 +72,7 @@ def test_proximity_wins_over_registration_order():
     far = create_atom_value_tap(out, initial=1)
     near = create_atom_value_tap(out, initial=2)
 
-    grok.register_tap(far)
+    grok.main_home_context.register_tap(far)
     root_child.register_tap(near)
 
     d = grok.query(out, leaf)

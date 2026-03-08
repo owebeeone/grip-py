@@ -1,6 +1,6 @@
 """Core API exports."""
 
-from .async_tap import AsyncTap, create_async_tap
+from .async_tap import AsyncTap, AsyncTapParams, create_async_tap
 from .atom_tap import AtomValueTap, MultiAtomValueTap, create_atom_value_tap, create_multi_atom_value_tap
 from .base_tap import BaseTap
 from .context import GripContext, GripContextLike
@@ -38,6 +38,7 @@ __all__ = [
     "MultiAtomValueTap",
     "FunctionTap",
     "AsyncTap",
+    "AsyncTapParams",
     "create_atom_value_tap",
     "create_multi_atom_value_tap",
     "create_function_tap",

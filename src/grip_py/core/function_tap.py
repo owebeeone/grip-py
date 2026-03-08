@@ -21,9 +21,15 @@ class FunctionTap(BaseTap):
         self,
         *,
         provides: Iterable[Grip[Any]],
+        destination_param_grips: Iterable[Grip[Any]] | None = None,
+        home_param_grips: Iterable[Grip[Any]] | None = None,
         compute: Callable[[GripContext], dict[Grip[Any], Any]],
     ):
-        super().__init__(provides=provides)
+        super().__init__(
+            provides=provides,
+            destination_param_grips=destination_param_grips,
+            home_param_grips=home_param_grips,
+        )
         self._compute = compute
 
     def produce(self, *, dest_context: GripContext | None = None) -> None:
@@ -45,6 +51,13 @@ class FunctionTap(BaseTap):
 def create_function_tap(
     *,
     provides: Iterable[Grip[Any]],
+    destination_param_grips: Iterable[Grip[Any]] | None = None,
+    home_param_grips: Iterable[Grip[Any]] | None = None,
     compute: Callable[[GripContext], dict[Grip[Any], Any]],
 ) -> FunctionTap:
-    return FunctionTap(provides=provides, compute=compute)
+    return FunctionTap(
+        provides=provides,
+        destination_param_grips=destination_param_grips,
+        home_param_grips=home_param_grips,
+        compute=compute,
+    )

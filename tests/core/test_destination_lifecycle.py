@@ -11,7 +11,7 @@ def test_drip_added_callback_runs_when_grip_added():
     grok = Grok(registry)
 
     tap = DestinationContextTap({out1: 42, out2: 42})
-    grok.register_tap(tap)
+    grok.main_home_context.register_tap(tap)
 
     ctx = grok.main_presentation_context.create_child()
     d1 = grok.query(out1, ctx)
@@ -32,7 +32,7 @@ def test_drip_removed_and_on_detach_callbacks():
     grok = Grok(registry)
 
     tap = DestinationContextTap({out1: 1, out2: 2})
-    grok.register_tap(tap)
+    grok.main_home_context.register_tap(tap)
 
     ctx = grok.main_presentation_context.create_child()
     grok.query(out1, ctx)
@@ -58,7 +58,7 @@ def test_multiple_destinations_have_independent_contexts():
     grok = Grok(registry)
 
     tap = DestinationContextTap({out: 99})
-    grok.register_tap(tap)
+    grok.main_home_context.register_tap(tap)
 
     c1 = grok.main_presentation_context.create_child()
     c2 = grok.main_presentation_context.create_child()

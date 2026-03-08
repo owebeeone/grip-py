@@ -2,6 +2,7 @@
 
 from .core import (
     AsyncTap,
+    AsyncTapParams,
     AtomValueTap,
     BaseTap,
     Drip,
@@ -54,6 +55,7 @@ __all__ = [
     "MultiAtomValueTap",
     "FunctionTap",
     "AsyncTap",
+    "AsyncTapParams",
     "create_atom_value_tap",
     "create_multi_atom_value_tap",
     "create_function_tap",

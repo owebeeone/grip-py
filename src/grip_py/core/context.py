@@ -99,7 +99,8 @@ class GripContext:
         return self._context_node.get_or_create_consumer(grip)
 
     def register_tap(self, tap: Tap | TapFactory) -> None:
-        self._grok.register_tap_at(self, tap)
+        home_ctx = self.get_grip_home_context()
+        self._grok.resolver.add_producer(home_ctx, tap)
 
     def unregister_tap(self, tap: Tap) -> None:
         self._grok.unregister_tap(tap)

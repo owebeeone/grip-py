@@ -1,5 +1,3 @@
-import pytest
-
 from grip_py.core.atom_tap import create_multi_atom_value_tap
 from grip_py.core.grok import Grok
 from grip_py.core.grip import Grip, GripRegistry
@@ -138,10 +136,6 @@ def test_complex_hierarchy_branch_overrides_are_isolated():
     assert _resolved_context_id(leaf_b, b) == "root"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known gap: same-context overlapping grips do not restore previous producer on removal",
-)
 def test_same_context_partial_override_restores_previous_provider_on_remove():
     registry = GripRegistry()
     a = registry.add("a", 0)
@@ -167,10 +161,6 @@ def test_same_context_partial_override_restores_previous_provider_on_remove():
     assert _resolved_tap(ctx, c) is tap1
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known gap: same-context overlap stack does not restore previous winner per grip",
-)
 def test_same_context_multi_level_overlap_restores_stack_order_on_remove():
     registry = GripRegistry()
     b = registry.add("b", 0)

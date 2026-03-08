@@ -121,6 +121,9 @@ class ProducerRecord:
         destination = self._destinations.get(dest_node)
         if destination is None:
             return
+        dest_ctx = dest_node.get_context()
+        if dest_ctx is not None:
+            self.tap.on_disconnect(dest_ctx, grip)
         destination.remove_grip(grip)
         if not destination.get_grips():
             self.remove_destination_for_context(dest_node)
@@ -180,6 +183,7 @@ class GripContextNode:
     children: list[GripContextNode]
     handle_holder: TaskHandleHolder
     producers: dict[Grip[Any], ProducerRecord]
+    producer_stacks: dict[Grip[Any], list[ProducerRecord]]
     producer_by_tap: dict[object, ProducerRecord]
     consumers: dict[Grip[Any], Drip[Any]]
     resolved_providers: dict[Grip[Any], GripContextNode]
@@ -194,6 +198,7 @@ class GripContextNode:
         self.handle_holder = TaskHandleHolder()
 
         self.producers: dict[Grip[Any], ProducerRecord] = {}
+        self.producer_stacks: dict[Grip[Any], list[ProducerRecord]] = {}
         self.producer_by_tap: dict[object, ProducerRecord] = {}
         self.consumers: dict[Grip[Any], Drip[Any]] = {}
         self.resolved_providers: dict[Grip[Any], GripContextNode] = {}
@@ -261,6 +266,13 @@ class GripContextNode:
         self.resolved_providers[grip] = node
 
     def record_producer(self, grip: Grip[Any], rec: ProducerRecord) -> None:
+        stack = self.producer_stacks.get(grip)
+        if stack is None:
+            stack = []
+            self.producer_stacks[grip] = stack
+        if rec in stack:
+            stack.remove(rec)
+        stack.append(rec)
         self.producers[grip] = rec
         self.touch()
 
@@ -286,9 +298,18 @@ class GripContextNode:
         if rec is None:
             return []
 
-        affected = [grip for grip, producer in self.producers.items() if producer is rec]
-        for grip in affected:
-            self.producers.pop(grip, None)
+        affected: list[Grip[Any]] = []
+        for grip, stack in tuple(self.producer_stacks.items()):
+            if rec not in stack:
+                continue
+            stack = [producer for producer in stack if producer is not rec]
+            affected.append(grip)
+            if stack:
+                self.producer_stacks[grip] = stack
+                self.producers[grip] = stack[-1]
+            else:
+                self.producer_stacks.pop(grip, None)
+                self.producers.pop(grip, None)
 
         self.producer_by_tap.pop(tap, None)
         self.producer_by_tap.pop(rec.tap, None)
