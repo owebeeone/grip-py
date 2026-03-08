@@ -114,8 +114,6 @@ class ProducerRecord:
         if destination is None:
             return
         destination.cleanup()
-        if not self._destinations:
-            self.tap.on_detach()
 
     def remove_destination_grip_for_context(self, dest_node: GripContextNode, grip: Grip[Any]) -> None:
         destination = self._destinations.get(dest_node)

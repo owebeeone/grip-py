@@ -7,6 +7,7 @@ from typing import Any, Protocol
 
 from .grip import Grip
 from .interfaces import Grok, GripContext, GripContextNode, Tap, TapFactory
+from .query_evaluator import EvaluationDelta, TapAttribution
 
 
 class IGripResolver(Protocol):
@@ -60,18 +61,61 @@ class SimpleResolver:
     def unlink_parent(self, child_context: GripContext, parent_context: GripContext) -> None:
         self._recompute_all()
 
-    def apply_producer_delta(self, context: GripContext, delta: dict[str, Any]) -> None:
-        """Phase-2 hook for matcher/query evaluator integration."""
-        added = delta.get("added") if isinstance(delta, dict) else None
-        removed = delta.get("removed") if isinstance(delta, dict) else None
+    def apply_producer_delta(self, context: GripContext, delta: dict[str, Any] | EvaluationDelta) -> None:
+        """Apply matcher-style attribution deltas with per-grip ownership updates."""
+        added, removed = self._normalize_delta(delta)
+        if not added and not removed:
+            return
 
-        if isinstance(added, dict):
-            for tap_or_factory, attribution in added.items():
-                self.add_producer(context, tap_or_factory)
-        if isinstance(removed, dict):
-            for tap_or_factory, attribution in removed.items():
-                if hasattr(tap_or_factory, "on_detach"):
-                    self.remove_producer(context, tap_or_factory)
+        home_context = context.get_grip_home_context()
+        home_node = home_context._get_context_node()
+        affected_grips: set[Grip[Any]] = set()
+
+        for tap_key, attribution in removed.items():
+            producer_record = self._find_producer_record(home_node, tap_key, attribution)
+            if producer_record is None:
+                continue
+            for grip in tuple(attribution.attributed_grips):
+                affected_grips.add(grip)
+                stack = home_node.producer_stacks.get(grip)
+                if stack is None or producer_record not in stack:
+                    continue
+                updated_stack = [record for record in stack if record is not producer_record]
+                if updated_stack:
+                    home_node.producer_stacks[grip] = updated_stack
+                    home_node.producers[grip] = updated_stack[-1]
+                else:
+                    home_node.producer_stacks.pop(grip, None)
+                    home_node.producers.pop(grip, None)
+                producer_record.outputs.discard(grip)
+
+        for tap_key, attribution in added.items():
+            output_grips = tuple(getattr(tap_key, "provides", tuple()))
+            producer_record = home_node.get_or_create_producer_record(tap_key, output_grips)
+            tap = producer_record.tap
+            if tap.get_home_context() is None:
+                tap.on_attach(home_context)
+
+            for grip in tuple(attribution.attributed_grips):
+                affected_grips.add(grip)
+                stack = home_node.producer_stacks.setdefault(grip, [])
+                if producer_record in stack:
+                    stack.remove(producer_record)
+                stack.append(producer_record)
+                home_node.producers[grip] = producer_record
+                producer_record.outputs.add(grip)
+
+        cleanup_candidates = set(removed.keys()) | set(added.keys())
+        for tap_key in cleanup_candidates:
+            producer_record = home_node.get_producer_record(tap_key)
+            if producer_record is None:
+                continue
+            if producer_record.outputs:
+                continue
+            home_node._remove_tap(tap_key)
+
+        for grip in affected_grips:
+            self._recompute_grip(grip)
 
     def _recompute_all(self) -> None:
         nodes = self._grok.get_graph().values()
@@ -92,11 +136,18 @@ class SimpleResolver:
         provider_node = self._resolve_provider_node(consumer_node, grip)
         previous = consumer_node.get_resolved_providers().get(grip)
 
-        if previous is provider_node:
-            return
+        if previous is provider_node and provider_node is not None:
+            producer = provider_node.get_producers().get(grip)
+            if producer is not None and consumer_node in producer.get_destinations():
+                return
 
         if previous is not None:
-            previous.remove_destination_for_context(grip, consumer_node)
+            previous_stack = getattr(previous, "producer_stacks", {}).get(grip)
+            if previous_stack:
+                for producer_record in tuple(previous_stack):
+                    producer_record.remove_destination_grip_for_context(consumer_node, grip)
+            else:
+                previous.remove_destination_for_context(grip, consumer_node)
 
         if provider_node is None:
             consumer_node.get_resolved_providers().pop(grip, None)
@@ -141,3 +192,56 @@ class SimpleResolver:
             queue.extend(roots)
 
         return None
+
+    def _normalize_delta(
+        self,
+        delta: dict[str, Any] | EvaluationDelta,
+    ) -> tuple[dict[Any, TapAttribution], dict[Any, TapAttribution]]:
+        if isinstance(delta, EvaluationDelta):
+            return dict(delta.added), dict(delta.removed)
+
+        if not isinstance(delta, dict):
+            return {}, {}
+
+        return (
+            self._normalize_delta_side(delta.get("added")),
+            self._normalize_delta_side(delta.get("removed")),
+        )
+
+    def _normalize_delta_side(self, side: Any) -> dict[Any, TapAttribution]:
+        normalized: dict[Any, TapAttribution] = {}
+        if not isinstance(side, dict):
+            return normalized
+
+        for tap_key, attribution in side.items():
+            if isinstance(attribution, TapAttribution):
+                normalized[tap_key] = attribution
+                continue
+
+            if isinstance(attribution, dict):
+                grips_raw = attribution.get("attributed_grips", ())
+                grips = set(grips_raw) if grips_raw is not None else set()
+                normalized[tap_key] = TapAttribution(
+                    producer_tap=attribution.get("producer_tap", tap_key),
+                    score=float(attribution.get("score", 0.0)),
+                    binding_id=str(attribution.get("binding_id", "")),
+                    attributed_grips=grips,
+                )
+                continue
+
+            if isinstance(attribution, (set, list, tuple)):
+                normalized[tap_key] = TapAttribution(
+                    producer_tap=tap_key,
+                    score=0.0,
+                    binding_id="",
+                    attributed_grips=set(attribution),
+                )
+
+        return normalized
+
+    @staticmethod
+    def _find_producer_record(home_node: GripContextNode, tap_key: Any, attribution: TapAttribution):
+        producer_record = home_node.get_producer_record(tap_key)
+        if producer_record is not None:
+            return producer_record
+        return home_node.get_producer_record(attribution.producer_tap)
