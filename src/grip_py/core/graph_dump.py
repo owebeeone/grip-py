@@ -14,6 +14,8 @@ from .grip import Grip
 
 @dataclass(slots=True)
 class GraphDumpSummary:
+    """Top-level counts and sanity signals for a graph dump."""
+
     context_count: int
     tap_count: int
     drip_count: int
@@ -25,6 +27,8 @@ class GraphDumpSummary:
 
 @dataclass(slots=True)
 class GraphDumpNodeContext:
+    """Serialized context-node entry for diagnostics/visualization."""
+
     key: str
     type: str
     label: str | None
@@ -38,12 +42,16 @@ class GraphDumpNodeContext:
 
 @dataclass(slots=True)
 class GraphDumpTapDestinationDrip:
+    """Link to a destination drip, optionally with value preview."""
+
     drip: str
     value: Any | None = None
 
 
 @dataclass(slots=True)
 class GraphDumpTapDestination:
+    """Tap-to-context destination mapping with input/output drip references."""
+
     context: str
     dest_parameter_drips: list[str | GraphDumpTapDestinationDrip]
     output_drips: list[str | GraphDumpTapDestinationDrip]
@@ -51,6 +59,8 @@ class GraphDumpTapDestination:
 
 @dataclass(slots=True)
 class GraphDumpNodeTap:
+    """Serialized tap node including destinations and optional state preview."""
+
     key: str
     type: str
     class_name: str
@@ -62,6 +72,8 @@ class GraphDumpNodeTap:
 
 @dataclass(slots=True)
 class GraphDumpNodeDrip:
+    """Serialized drip node and provider/value metadata."""
+
     key: str
     type: str
     grip: str
@@ -74,6 +86,8 @@ class GraphDumpNodeDrip:
 
 @dataclass(slots=True)
 class GraphDumpNodes:
+    """Graph dump node collections."""
+
     contexts: list[GraphDumpNodeContext] = field(default_factory=list)
     taps: list[GraphDumpNodeTap] = field(default_factory=list)
     drips: list[GraphDumpNodeDrip] = field(default_factory=list)
@@ -81,6 +95,8 @@ class GraphDumpNodes:
 
 @dataclass(slots=True)
 class GraphDump:
+    """Complete graph dump payload."""
+
     timestamp_iso: str
     summary: GraphDumpSummary
     nodes: GraphDumpNodes
@@ -88,6 +104,8 @@ class GraphDump:
 
 @dataclass(slots=True)
 class GraphDumpOptions:
+    """Controls for value inclusion and preview truncation in dumps."""
+
     include_values: bool = True
     max_value_length: int = 200
     include_tap_values: bool = False
@@ -105,6 +123,7 @@ class GraphDumpKeyRegistry:
     _drip_to_key: dict[Any, str] = field(default_factory=dict)
 
     def get_context_key(self, node: GripContextNode) -> str:
+        """Return stable dump key for a context node."""
         existing = self._context_to_key.get(node)
         if existing is not None:
             return existing
@@ -114,6 +133,7 @@ class GraphDumpKeyRegistry:
         return key
 
     def get_tap_key(self, tap: Any) -> str:
+        """Return stable dump key for a tap instance."""
         existing = self._tap_to_key.get(tap)
         if existing is not None:
             return existing
@@ -123,6 +143,7 @@ class GraphDumpKeyRegistry:
         return key
 
     def get_drip_key(self, drip: Drip[Any]) -> str:
+        """Return stable dump key for a drip instance."""
         existing = self._drip_to_key.get(drip)
         if existing is not None:
             return existing
@@ -152,6 +173,7 @@ class GripGraphDumper:
         self._opts = opts or GraphDumpOptions()
 
     def dump(self) -> GraphDump:
+        """Capture the current Grok graph as a serializable snapshot."""
         sanity = self._grok.get_graph_sanity_check()
         nodes = GraphDumpNodes()
 

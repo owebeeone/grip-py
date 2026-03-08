@@ -19,6 +19,7 @@ class FunctionTapComputeArgs:
     _tap: "FunctionTap"
 
     def get_home_param(self, grip: Grip[Any]) -> Any:
+        """Return the latest resolved home-parameter value."""
         return self._tap.get_home_param_value(grip)
 
     def get_destination_param(
@@ -26,12 +27,14 @@ class FunctionTapComputeArgs:
         grip: Grip[Any],
         dest_context: GripContext | None = None,
     ) -> Any:
+        """Return a destination-parameter value for the active destination."""
         context = dest_context or self.dest_context or self._tap.get_home_context()
         if context is None:
             return grip.default
         return self._tap.get_destination_param_value(context, grip)
 
     def get_state(self, grip: Grip[Any]) -> Any:
+        """Return state value maintained by this FunctionTap."""
         return self._tap.get_state(grip)
 
     def __getattr__(self, name: str) -> Any:
@@ -45,9 +48,13 @@ class FunctionTapComputeArgs:
 class FunctionTapHandle(Protocol):
     """State handle API exposed through optional handle grip."""
 
-    def get_state(self, grip: Grip[Any]) -> Any: ...
+    def get_state(self, grip: Grip[Any]) -> Any:
+        """Return a stored state value."""
+        ...
 
-    def set_state(self, grip: Grip[Any], value: Any) -> None: ...
+    def set_state(self, grip: Grip[Any], value: Any) -> None:
+        """Set a stored state value and trigger recompute."""
+        ...
 
 
 ComputeFn = Callable[[FunctionTapComputeArgs], Mapping[Grip[Any], Any]]
@@ -95,9 +102,11 @@ class FunctionTap(BaseTap):
         self._state_grips = set(state_grips or ()) | set(self._state.keys())
 
     def get_state(self, grip: Grip[Any]) -> Any:
+        """Return local tap state value for ``grip``."""
         return self._state.get(grip)
 
     def set_state(self, grip: Grip[Any], value: Any) -> None:
+        """Update local state and trigger recomputation when value changed."""
         previous = self._state.get(grip)
         if previous == value:
             return
@@ -105,6 +114,7 @@ class FunctionTap(BaseTap):
         self.produce()
 
     def produce(self, *, dest_context: GripContext | None = None) -> None:
+        """Compute outputs and publish to one destination or all destinations."""
         if dest_context is not None:
             values = self._compute_for_context(dest_context)
             self.publish(values, dest_context=dest_context)
@@ -146,6 +156,7 @@ def create_function_tap(
     state_grips: Iterable[Grip[Any]] | None = None,
     initial_state: Mapping[Grip[Any], Any] | Iterable[tuple[Grip[Any], Any]] | None = None,
 ) -> FunctionTap:
+    """Create a ``FunctionTap`` instance from a compute callback."""
     return FunctionTap(
         provides=provides,
         destination_param_grips=destination_param_grips,

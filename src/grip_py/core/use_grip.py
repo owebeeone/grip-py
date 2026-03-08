@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 
 def use_grip(grok: Any, grip: Any, ctx: Any = None) -> T | None:
-    """Return current value for the queried grip/context pair."""
+    """Return the current value for ``grip`` in ``ctx`` (or main presentation)."""
     return grok.query(grip, ctx).get()
 
 
@@ -25,7 +25,15 @@ async def watch_drip(
     queue_size: int = 1,
     overflow: Literal["drop_oldest", "drop_newest"] = "drop_oldest",
 ) -> AsyncIterator[T | None]:
-    """Yield drip updates as an async iterator."""
+    """Yield drip updates as an async iterator.
+
+    Args:
+        drip: Source drip to watch.
+        emit_initial: If ``True``, emit current value immediately on subscribe.
+        priority: If ``True``, subscribe via ``subscribe_priority``.
+        queue_size: Buffered update count for the iterator.
+        overflow: Queue overflow policy.
+    """
     if queue_size < 1:
         raise ValueError("queue_size must be >= 1")
     if overflow not in {"drop_oldest", "drop_newest"}:

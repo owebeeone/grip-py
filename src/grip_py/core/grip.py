@@ -13,7 +13,14 @@ _MISSING = object()
 
 @dataclass(eq=False, frozen=True, slots=True)
 class Grip(Generic[T]):
-    """Typed grip identifier."""
+    """Typed grip identifier used as a stable key in the graph.
+
+    A ``Grip[T]`` carries:
+    - ``name``: user-facing symbolic name.
+    - ``key``: canonical identity used for lookups.
+    - ``default``: default value propagated when no producer is available.
+    - ``data_type``: runtime type metadata for conversions and tooling.
+    """
 
     name: str
     key: str
@@ -23,7 +30,17 @@ class Grip(Generic[T]):
 
 @dataclass(slots=True, eq=False)
 class GripRegistry:
-    """Registry for grip keys only."""
+    """Registry for defining and owning ``Grip`` instances.
+
+    The first version of grip-py only registers grip keys (not taps).
+
+    Example:
+        >>> registry = GripRegistry()
+        >>> user_name = registry.add("UserName", "")
+        >>> user_age = registry.add("UserAge", 0)
+        >>> temp_c = registry.add("TempCelsius", value_type=float)
+        >>> # Inferred as Grip[str], Grip[int], Grip[float | None]
+    """
 
     _keys_by_name: dict[str, Grip[Any]] = field(default_factory=dict, init=False)
 
@@ -76,13 +93,31 @@ class GripRegistry:
         value_type: type[Any] | None = None,
         nullable: bool = False,
     ) -> Grip[Any]:
-        """Define a grip and register it by name.
+        """Register a grip and return its typed key object.
 
-        Rules:
-        - Name must be unique.
-        - `add(name, default)` infers type from default.
-        - `add(name, *, value_type=T)` creates nullable grip with default None.
-        - `add(name, default, value_type=T)` converts default using `T(default)`.
+        Supported call forms:
+        - ``add(name, default) -> Grip[T]``
+          Infers ``T`` from ``default``.
+        - ``add(name, *, value_type=T) -> Grip[T | None]``
+          Creates a nullable grip with ``default=None``.
+        - ``add(name, default, value_type=T, nullable=False) -> Grip[T]``
+          Converts the default with ``T(default)``.
+        - ``add(name, None, value_type=T, nullable=True) -> Grip[T | None]``
+          Explicit nullable typed grip.
+
+        Type-checkers/IDEs infer return types from overloads, e.g.:
+        - ``registry.add("UserName", "")`` infers ``Grip[str]``
+        - ``registry.add("TempCelsius", value_type=float)`` infers ``Grip[float | None]``
+
+        Args:
+            name: Unique grip name in this registry.
+            default: Optional default value.
+            value_type: Optional explicit target type for conversion/inference.
+            nullable: Whether ``None`` is allowed when ``value_type`` is provided.
+
+        Raises:
+            DuplicateGrip: If ``name`` already exists.
+            TypeError: If the call shape is invalid.
         """
         if name in self._keys_by_name:
             raise DuplicateGrip(f"Grip '{name}' is already registered")

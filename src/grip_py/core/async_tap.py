@@ -15,6 +15,8 @@ from .interfaces import GripContext
 
 @dataclass(slots=True, frozen=True)
 class AsyncTapParams:
+    """Fetcher input containing resolved destination and home parameters."""
+
     destination_params: Mapping[Grip[Any], Any]
     home_params: Mapping[Grip[Any], Any]
 
@@ -79,18 +81,23 @@ class AsyncTapController:
     _abort: Callable[[], None]
 
     def retry(self, force_refetch: bool = False) -> None:
+        """Abort in-flight work and trigger a retry immediately."""
         self._retry(force_refetch)
 
     def refresh(self, force_refetch: bool = False) -> None:
+        """Trigger a refresh using current parameter values."""
         self._refresh(force_refetch)
 
     def reset(self) -> None:
+        """Reset state to ``idle`` and republish default output values."""
         self._reset()
 
     def cancel_retry(self) -> None:
+        """Cancel any pending scheduled retry for this destination key."""
         self._cancel_retry()
 
     def abort(self) -> None:
+        """Cancel the current in-flight fetch task (if any)."""
         self._abort()
 
 
@@ -788,6 +795,7 @@ class AsyncTap(BaseTap):
         self._retry_tasks_by_key[key] = loop.create_task(run_retry())
 
     def get_request_state(self, dest_context: GripContext) -> AsyncRequestState:
+        """Return current async lifecycle state for a destination context."""
         state = self._state_by_dest_id.get(dest_context.id)
         if state is None:
             return AsyncRequestState(
@@ -822,6 +830,11 @@ def create_async_tap(
     controller_grip: Grip[AsyncTapController] | None = None,
     fetcher: AsyncFetcher,
 ) -> AsyncTap:
+    """Create an ``AsyncTap`` with request sharing/caching semantics.
+
+    This helper mirrors :class:`AsyncTap` constructor options and is preferred
+    for readability at call sites.
+    """
     return AsyncTap(
         provides=provides,
         destination_param_grips=destination_param_grips,

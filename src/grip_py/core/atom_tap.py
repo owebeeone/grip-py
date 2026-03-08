@@ -24,6 +24,7 @@ class MultiAtomValueTap(BaseTap):
         self._values = dict(values)
 
     def set(self, grip: Grip[Any], value: Any) -> None:
+        """Set one provided grip value and publish it to connected consumers."""
         with self._lock:
             if grip not in self._values:
                 raise KeyError(f"Grip {grip.name!r} is not provided by this tap")
@@ -31,12 +32,14 @@ class MultiAtomValueTap(BaseTap):
         self.publish({grip: value})
 
     def get(self, grip: Grip[Any]) -> Any:
+        """Return the current value for a provided grip."""
         with self._lock:
             if grip not in self._values:
                 raise KeyError(f"Grip {grip.name!r} is not provided by this tap")
             return self._values[grip]
 
     def update(self, grip: Grip[Any], updater: Callable[[Any], Any]) -> None:
+        """Apply a synchronous updater and publish the resulting value."""
         with self._lock:
             if grip not in self._values:
                 raise KeyError(f"Grip {grip.name!r} is not provided by this tap")
@@ -49,12 +52,14 @@ class MultiAtomValueTap(BaseTap):
         grip: Grip[Any],
         updater: Callable[[Any], Awaitable[Any]],
     ) -> None:
+        """Apply an async updater and publish the resulting value."""
         # Not atomic across await boundaries: concurrent writers may interleave.
         current_value = MultiAtomValueTap.get(self, grip)
         next_value = await updater(current_value)
         MultiAtomValueTap.set(self, grip, next_value)
 
     def produce(self, *, dest_context=None) -> None:
+        """Publish current values to all or one destination context."""
         self.publish(self._values, dest_context=dest_context)
 
 
@@ -70,21 +75,27 @@ class AtomValueTap(MultiAtomValueTap):
         self._grip = grip
 
     def set(self, value: Any) -> None:  # type: ignore[override]
+        """Set the atom value and publish it."""
         super().set(self._grip, value)
 
     def get(self) -> Any:  # type: ignore[override]
+        """Return the current atom value."""
         return super().get(self._grip)
 
     def update(self, updater: Callable[[Any], Any]) -> None:  # type: ignore[override]
+        """Apply a synchronous updater to the atom value."""
         super().update(self._grip, updater)
 
     async def update_async(self, updater: Callable[[Any], Awaitable[Any]]) -> None:  # type: ignore[override]
+        """Apply an async updater to the atom value."""
         await super().update_async(self._grip, updater)
 
 
 def create_atom_value_tap(grip: Grip[Any], *, initial: Any = None) -> AtomValueTap:
+    """Create a single-output mutable atom tap."""
     return AtomValueTap(grip, initial)
 
 
 def create_multi_atom_value_tap(values: dict[Grip[Any], Any]) -> MultiAtomValueTap:
+    """Create a multi-output mutable atom tap."""
     return MultiAtomValueTap(values)

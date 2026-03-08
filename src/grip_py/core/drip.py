@@ -170,14 +170,17 @@ class Drip(Generic[T]):
         return unsubscribe
 
     def add_on_first_subscriber(self, fn: VoidCallback) -> None:
+        """Register a callback invoked when subscriber count goes 0 -> 1."""
         with self._lock:
             self._first_sub_callbacks.add(fn)
 
     def add_on_zero_subscribers(self, fn: VoidCallback) -> None:
+        """Register a callback invoked when subscriber count drops to zero."""
         with self._lock:
             self._zero_sub_callbacks.add(fn)
 
     def unsubscribe_all(self) -> None:
+        """Remove all subscribers and cancel all async subscriber tasks."""
         with self._lock:
             had_subscribers = self._has_any_subscribers_unlocked()
             self._subs.clear()

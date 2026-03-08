@@ -23,6 +23,8 @@ def _is_tap_factory(candidate: object) -> bool:
 
 @dataclass(slots=True)
 class ParentRef:
+    """Internal parent-edge record with priority ordering."""
+
     node: GripContextNode
     priority: int
 
