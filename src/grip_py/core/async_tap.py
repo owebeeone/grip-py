@@ -102,6 +102,7 @@ class _CacheEntry:
 
 @dataclass(slots=True)
 class _DestinationState:
+    history_size: int = 10
     current_state: RequestState = field(
         default_factory=lambda: RequestState(type="idle", retry_at=None)
     )
@@ -123,6 +124,7 @@ class AsyncTap(BaseTap):
     _retry: RetryConfig | None
     _refresh_before_expiry_ms: int
     _keep_stale_data_on_transition: bool
+    _history_size: int
     _state_grip: Grip[Any] | None
     _controller_grip: Grip[Any] | None
 
@@ -149,6 +151,7 @@ class AsyncTap(BaseTap):
         cleanup_delay_ms: int = 1000,
         deadline_ms: int | None = None,
         retry: RetryConfig | None = None,
+        history_size: int = 10,
         refresh_before_expiry_ms: int = 0,
         keep_stale_data_on_transition: bool = False,
         state_grip: Grip[AsyncRequestState] | None = None,
@@ -173,6 +176,7 @@ class AsyncTap(BaseTap):
         self._cleanup_delay_ms = max(0, cleanup_delay_ms)
         self._deadline_ms = max(0, deadline_ms) if deadline_ms is not None else None
         self._retry = retry
+        self._history_size = max(0, history_size)
         self._refresh_before_expiry_ms = max(0, refresh_before_expiry_ms)
         self._keep_stale_data_on_transition = keep_stale_data_on_transition
         self._state_grip = state_grip
@@ -262,7 +266,10 @@ class AsyncTap(BaseTap):
             self._detach_destination_from_key(destination_id, previous_key)
             self._attach_destination_to_key(destination_id, key)
 
-        state = self._state_by_dest_id.setdefault(destination_id, _DestinationState())
+        state = self._state_by_dest_id.setdefault(
+            destination_id,
+            _DestinationState(history_size=self._history_size),
+        )
         state.request_key = key
         if state.controller is None:
             state.controller = self._create_controller(destination_id)
@@ -633,16 +640,20 @@ class AsyncTap(BaseTap):
         *,
         reason: str | None = None,
     ) -> None:
-        state = self._state_by_dest_id.setdefault(destination_id, _DestinationState())
-        history_entry = StateHistoryEntry(
-            state=state.current_state,
-            timestamp=time.time(),
-            request_key=state.request_key,
-            transition_reason=reason,
+        state = self._state_by_dest_id.setdefault(
+            destination_id,
+            _DestinationState(history_size=self._history_size),
         )
-        state.history.append(history_entry)
-        if len(state.history) > 20:
-            state.history.pop(0)
+        if state.history_size > 0:
+            history_entry = StateHistoryEntry(
+                state=state.current_state,
+                timestamp=time.time(),
+                request_key=state.request_key,
+                transition_reason=reason,
+            )
+            state.history.append(history_entry)
+            if len(state.history) > state.history_size:
+                state.history.pop(0)
         state.current_state = next_state
         self._publish_state(destination_id)
 
@@ -804,6 +815,7 @@ def create_async_tap(
     cleanup_delay_ms: int = 1000,
     deadline_ms: int | None = None,
     retry: RetryConfig | None = None,
+    history_size: int = 10,
     refresh_before_expiry_ms: int = 0,
     keep_stale_data_on_transition: bool = False,
     state_grip: Grip[AsyncRequestState] | None = None,
@@ -820,6 +832,7 @@ def create_async_tap(
         cleanup_delay_ms=cleanup_delay_ms,
         deadline_ms=deadline_ms,
         retry=retry,
+        history_size=history_size,
         refresh_before_expiry_ms=refresh_before_expiry_ms,
         keep_stale_data_on_transition=keep_stale_data_on_transition,
         state_grip=state_grip,
