@@ -19,7 +19,17 @@ from .function_tap import FunctionTap, FunctionTapComputeArgs, FunctionTapHandle
 from .grok import Grok, GrokImpl, GrokProtocol
 from .grip import Grip, GripRegistry
 from .interfaces import Resolver
-from .query_evaluator import EvaluationDelta, MatchedTap, QueryEvaluator, TapAttribution
+from .matcher import MatchingContext, TapMatcher
+from .query import Query
+from .query_evaluator import (
+    AddBindingResult,
+    EvaluationDelta,
+    MatchedTap,
+    QueryBinding,
+    QueryEvaluator,
+    RemoveBindingResult,
+    TapAttribution,
+)
 from .tap import Tap, TapDestinationContext, TapFactory
 from .tap_resolver import SimpleResolver
 from .task_queue import TaskHandle, TaskHandleHolder, TaskQueue
@@ -56,10 +66,16 @@ __all__ = [
     "AsyncRequestState",
     "AsyncTapController",
     "RetryConfig",
+    "Query",
+    "QueryBinding",
+    "AddBindingResult",
+    "RemoveBindingResult",
     "MatchedTap",
     "TapAttribution",
     "EvaluationDelta",
     "QueryEvaluator",
+    "TapMatcher",
+    "MatchingContext",
     "create_atom_value_tap",
     "create_multi_atom_value_tap",
     "create_function_tap",

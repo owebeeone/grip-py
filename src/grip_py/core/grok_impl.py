@@ -10,6 +10,7 @@ from .drip import Drip
 from .grip import Grip, GripRegistry
 from .graph import GripContextNode, GrokGraph
 from .interfaces import Resolver, Tap
+from .query_evaluator import EvaluationDelta
 from .task_queue import TaskHandleContainer, TaskQueue
 from .tap_resolver import SimpleResolver
 
@@ -110,7 +111,11 @@ class GrokImpl:
         self.resolver.add_consumer(ctx, grip)
         return drip
 
-    def apply_producer_delta(self, context: GripContext, delta: dict[str, Any]) -> None:
+    def apply_producer_delta(
+        self,
+        context: GripContext,
+        delta: dict[str, Any] | EvaluationDelta,
+    ) -> None:
         self.resolver.apply_producer_delta(context, delta)
 
     def notify_consumers(self, dest_ctx: GripContext, grip: Grip[Any], value: Any) -> int:

@@ -14,6 +14,13 @@ from .interfaces import Grok, GripContext, Tap, TapDestinationContext, TapFactor
 from .task_queue import TaskHandleHolder
 
 
+def _is_tap_factory(candidate: object) -> bool:
+    """Return True when an object behaves like a tap factory."""
+    build_fn = getattr(candidate, "build", None)
+    produce_fn = getattr(candidate, "produce", None)
+    return callable(build_fn) and not callable(produce_fn)
+
+
 @dataclass(slots=True)
 class ParentRef:
     node: GripContextNode
@@ -81,7 +88,7 @@ class ProducerRecord:
     _destinations: dict[GripContextNode, Destination]
 
     def __init__(self, tap_or_factory: Tap | TapFactory, outputs: Iterable[Grip[Any]] | None = None):
-        if hasattr(tap_or_factory, "build") and not hasattr(tap_or_factory, "provides"):
+        if _is_tap_factory(tap_or_factory):
             self.tap_factory: TapFactory | None = tap_or_factory  # type: ignore[assignment]
             self.tap: Tap = tap_or_factory.build()  # type: ignore[union-attr]
         else:

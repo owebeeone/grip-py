@@ -163,3 +163,119 @@ def test_async_tap_cleanup_delay_reuses_inflight_after_detach_and_reattach() -> 
         assert fetch_count == 1
 
     asyncio.run(scenario())
+
+
+def test_async_tap_refresh_before_expiry_triggers_background_refetch() -> None:
+    async def scenario() -> None:
+        registry = GripRegistry()
+        out = registry.add("Out", 0)
+        grok = Grok(registry)
+
+        fetch_count = 0
+
+        async def fetcher(_: AsyncTapParams) -> dict[Grip[Any], Any]:
+            nonlocal fetch_count
+            fetch_count += 1
+            await asyncio.sleep(0.01)
+            return {out: fetch_count}
+
+        tap = create_async_tap(
+            provides=[out],
+            cache_ttl_ms=120,
+            refresh_before_expiry_ms=60,
+            fetcher=fetcher,
+        )
+        grok.main_home_context.register_tap(tap)
+
+        ctx = grok.main_presentation_context.create_child()
+        drip = grok.query(out, ctx)
+        await _wait_for_value(drip, 1)
+
+        await _wait_for_value(drip, 2, timeout=1.5)
+        assert fetch_count >= 2
+
+    asyncio.run(scenario())
+
+
+def test_async_tap_stale_with_error_preserves_data_when_keep_stale_enabled() -> None:
+    async def scenario() -> None:
+        registry = GripRegistry()
+        out = registry.add("Out", 0)
+        state_grip = registry.add("State", value_type=object)
+        controller_grip = registry.add("Controller", value_type=object)
+        grok = Grok(registry)
+
+        fetch_count = 0
+
+        async def fetcher(_: AsyncTapParams) -> dict[Grip[Any], Any]:
+            nonlocal fetch_count
+            fetch_count += 1
+            await asyncio.sleep(0.01)
+            if fetch_count == 1:
+                return {out: 10}
+            raise RuntimeError("refresh failed")
+
+        tap = create_async_tap(
+            provides=[out],
+            keep_stale_data_on_transition=True,
+            state_grip=state_grip,
+            controller_grip=controller_grip,
+            fetcher=fetcher,
+        )
+        grok.main_home_context.register_tap(tap)
+
+        ctx = grok.main_presentation_context.create_child()
+        out_drip = grok.query(out, ctx)
+        state_drip = grok.query(state_grip, ctx)
+        controller_drip = grok.query(controller_grip, ctx)
+
+        await _wait_for_value(out_drip, 10)
+        await _wait_for_state_type(state_drip, "success")
+
+        controller = controller_drip.get()
+        assert controller is not None
+        controller.refresh(force_refetch=True)
+
+        await _wait_for_state_type(state_drip, "stale-with-error")
+        assert out_drip.get() == 10
+
+    asyncio.run(scenario())
+
+
+def test_async_tap_refresh_resets_value_when_keep_stale_disabled() -> None:
+    async def scenario() -> None:
+        registry = GripRegistry()
+        out = registry.add("Out", 0)
+        state_grip = registry.add("State", value_type=object)
+        controller_grip = registry.add("Controller", value_type=object)
+        grok = Grok(registry)
+
+        async def fetcher(_: AsyncTapParams) -> dict[Grip[Any], Any]:
+            await asyncio.sleep(0.05)
+            return {out: 10}
+
+        tap = create_async_tap(
+            provides=[out],
+            keep_stale_data_on_transition=False,
+            state_grip=state_grip,
+            controller_grip=controller_grip,
+            fetcher=fetcher,
+        )
+        grok.main_home_context.register_tap(tap)
+
+        ctx = grok.main_presentation_context.create_child()
+        out_drip = grok.query(out, ctx)
+        state_drip = grok.query(state_grip, ctx)
+        controller_drip = grok.query(controller_grip, ctx)
+
+        await _wait_for_value(out_drip, 10)
+        await _wait_for_state_type(state_drip, "success")
+
+        controller = controller_drip.get()
+        assert controller is not None
+        controller.refresh(force_refetch=True)
+
+        await _wait_for_state_type(state_drip, "loading")
+        assert out_drip.get() == 0
+
+    asyncio.run(scenario())

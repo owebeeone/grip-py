@@ -9,6 +9,9 @@ from .drip import Drip
 from .grip import Grip
 from .task_queue import TaskHandleContainer
 
+if False:  # pragma: no cover
+    from .query_evaluator import EvaluationDelta
+
 
 @runtime_checkable
 class ParentRef(Protocol):
@@ -69,6 +72,8 @@ class Tap(Protocol):
 @runtime_checkable
 class TapFactory(Protocol):
     """Factory for creating taps."""
+
+    provides: tuple[Grip[Any], ...]
 
     def build(self) -> Tap: ...
 
@@ -200,7 +205,11 @@ class Resolver(Protocol):
 
     def unlink_parent(self, child_context: GripContext, parent_context: GripContext) -> None: ...
 
-    def apply_producer_delta(self, context: GripContext, delta: dict[str, Any]) -> None: ...
+    def apply_producer_delta(
+        self,
+        context: GripContext,
+        delta: dict[str, Any] | EvaluationDelta,  # type: ignore[name-defined]
+    ) -> None: ...
 
 
 @runtime_checkable

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
 from .grip import Grip
+from .query import Query
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,8 +37,90 @@ class EvaluationDelta:
     removed: dict[Any, TapAttribution] = field(default_factory=dict)
 
 
+@dataclass(frozen=True, slots=True)
+class QueryBinding:
+    """Binding between a query and a producer tap/factory."""
+
+    id: str
+    query: Query
+    tap: Any
+    base_score: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class AddBindingResult:
+    """Input grip delta after adding or replacing a binding."""
+
+    new_inputs: set[Grip[Any]] = field(default_factory=set)
+    removed_inputs: set[Grip[Any]] = field(default_factory=set)
+
+
+@dataclass(frozen=True, slots=True)
+class RemoveBindingResult:
+    """Input grip delta after removing a binding."""
+
+    removed_inputs: set[Grip[Any]] = field(default_factory=set)
+
+
+class ContextSnapshot(Protocol):
+    """Query evaluation snapshot protocol."""
+
+    def get_value(self, grip: Grip[Any]) -> Any: ...
+
+
 class QueryEvaluator:
-    """Utility for deterministic output attribution and delta computation."""
+    """Evaluator for query bindings with deterministic attribution."""
+
+    def __init__(self) -> None:
+        self._bindings: dict[str, QueryBinding] = {}
+        self._active_attributions: dict[Any, TapAttribution] = {}
+
+    def add_binding(self, binding: QueryBinding) -> AddBindingResult:
+        """Add or replace a binding and return input subscription deltas."""
+        before_inputs = self._all_inputs()
+        self._bindings[binding.id] = binding
+        after_inputs = self._all_inputs()
+        return AddBindingResult(
+            new_inputs=after_inputs - before_inputs,
+            removed_inputs=before_inputs - after_inputs,
+        )
+
+    def remove_binding(self, binding_id: str) -> RemoveBindingResult:
+        """Remove a binding and return input grips no longer needed."""
+        before_inputs = self._all_inputs()
+        self._bindings.pop(binding_id, None)
+        after_inputs = self._all_inputs()
+        return RemoveBindingResult(removed_inputs=before_inputs - after_inputs)
+
+    def get_binding(self, binding_id: str) -> QueryBinding | None:
+        return self._bindings.get(binding_id)
+
+    def on_grips_changed(
+        self,
+        changed_grips: set[Grip[Any]],
+        snapshot: ContextSnapshot,
+    ) -> EvaluationDelta:
+        """Re-evaluate current bindings and return producer attribution delta."""
+        current = self.evaluate(snapshot.get_value)
+        delta = self.diff(self._active_attributions, current)
+        self._active_attributions = current
+        return delta
+
+    def evaluate(self, get_value: Callable[[Grip[Any]], Any]) -> dict[Any, TapAttribution]:
+        """Evaluate all bindings against a value lookup callable."""
+        matches: list[MatchedTap] = []
+        for binding in self._bindings.values():
+            score = binding.query.match_score(get_value)
+            if score is None:
+                continue
+            matches.append(
+                MatchedTap(
+                    tap=binding.tap,
+                    score=float(binding.base_score) + float(score),
+                    binding_id=binding.id,
+                )
+            )
+        return self.attribute(matches)
 
     def attribute(self, matches: Iterable[MatchedTap]) -> dict[Any, TapAttribution]:
         """Assign output grips to winning taps by score then binding-id tie-break."""
@@ -99,3 +182,9 @@ class QueryEvaluator:
                     )
 
         return EvaluationDelta(added=added, removed=removed)
+
+    def _all_inputs(self) -> set[Grip[Any]]:
+        inputs: set[Grip[Any]] = set()
+        for binding in self._bindings.values():
+            inputs.update(binding.query.conditions.keys())
+        return inputs

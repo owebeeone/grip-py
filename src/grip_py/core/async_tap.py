@@ -133,6 +133,7 @@ class AsyncTap(BaseTap):
     _key_dest_ids: dict[str, set[str]]
     _cleanup_tasks: dict[str, asyncio.Task[None]]
     _retry_tasks_by_key: dict[str, asyncio.Task[None]]
+    _refresh_tasks_by_key: dict[str, asyncio.Task[None]]
     _retry_attempt_by_key: dict[str, int]
     _state_by_dest_id: dict[str, _DestinationState]
 
@@ -184,6 +185,7 @@ class AsyncTap(BaseTap):
         self._key_dest_ids = {}
         self._cleanup_tasks = {}
         self._retry_tasks_by_key = {}
+        self._refresh_tasks_by_key = {}
         self._retry_attempt_by_key = {}
         self._state_by_dest_id = {}
 
@@ -207,6 +209,11 @@ class AsyncTap(BaseTap):
             if not task.done():
                 task.cancel()
         self._retry_tasks_by_key.clear()
+
+        for task in tuple(self._refresh_tasks_by_key.values()):
+            if not task.done():
+                task.cancel()
+        self._refresh_tasks_by_key.clear()
         self._retry_attempt_by_key.clear()
 
         self._cache_by_key.clear()
@@ -272,19 +279,11 @@ class AsyncTap(BaseTap):
         task = self._inflight_by_key.get(key)
         if task is not None and not task.done():
             if self._latest_only:
-                self._set_state(
-                    destination_id,
-                    RequestState(type="loading", initiated_at=time.time()),
-                    reason="joined_inflight",
-                )
+                self._set_fetching_state(destination_id, reason="joined_inflight")
                 return
             task.cancel()
 
-        self._set_state(
-            destination_id,
-            RequestState(type="loading", initiated_at=time.time()),
-            reason="request_started",
-        )
+        self._set_fetching_state(destination_id, reason="request_started")
         self._inflight_by_key[key] = loop.create_task(
             self._run_fetch_for_key(key, request_params)
         )
@@ -325,6 +324,7 @@ class AsyncTap(BaseTap):
             destination_ids = tuple(self._key_dest_ids.get(key, ()))
             if error is None:
                 self._clear_retry_for_key(key)
+                self._schedule_refresh_for_key(key)
                 for destination_id in destination_ids:
                     if self._latest_only and self._dest_key_by_id.get(destination_id) != key:
                         continue
@@ -338,17 +338,35 @@ class AsyncTap(BaseTap):
                     )
                 return values
 
+            self._cancel_refresh_for_key(key)
             for destination_id in destination_ids:
                 if self._latest_only and self._dest_key_by_id.get(destination_id) != key:
                     continue
-                self._set_state(
-                    destination_id,
-                    RequestState(
+                previous_state = self._state_by_dest_id.get(destination_id)
+                previous = (
+                    previous_state.current_state
+                    if previous_state is not None
+                    else RequestState(type="idle")
+                )
+                now = time.time()
+                if self._has_data_state(previous) and self._keep_stale_data_on_transition:
+                    next_state = RequestState(
+                        type="stale-with-error",
+                        retrieved_at=previous.retrieved_at or now,
+                        error=error,
+                        failed_at=now,
+                        retry_at=self._current_retry_at_for_key(key),
+                    )
+                else:
+                    next_state = RequestState(
                         type="error",
                         error=error,
-                        failed_at=time.time(),
+                        failed_at=now,
                         retry_at=self._current_retry_at_for_key(key),
-                    ),
+                    )
+                self._set_state(
+                    destination_id,
+                    next_state,
                     reason="request_error",
                 )
 
@@ -474,6 +492,7 @@ class AsyncTap(BaseTap):
         if retry_task is not None and not retry_task.done():
             retry_task.cancel()
         self._retry_attempt_by_key.pop(key, None)
+        self._cancel_refresh_for_key(key)
 
         cleanup_task = self._cleanup_tasks.pop(key, None)
         if cleanup_task is not None and not cleanup_task.done():
@@ -515,6 +534,9 @@ class AsyncTap(BaseTap):
             return
 
         state = self._state_by_dest_id.setdefault(destination_id, _DestinationState())
+        key = self._dest_key_by_id.get(destination_id)
+        if key is not None:
+            self._cancel_refresh_for_key(key)
         state.request_key = None
         self._set_state(
             destination_id,
@@ -566,6 +588,43 @@ class AsyncTap(BaseTap):
         if controller is None:
             return
         self.publish({self._controller_grip: controller}, dest_context=destination)
+
+    @staticmethod
+    def _has_data_state(state: RequestState) -> bool:
+        return state.type in {"success", "stale-while-revalidate", "stale-with-error"}
+
+    def _publish_data_defaults(self, destination: GripContext) -> None:
+        defaults = {
+            grip: grip.default
+            for grip in self.provides
+            if grip not in {self._state_grip, self._controller_grip}
+        }
+        if defaults:
+            self.publish(defaults, dest_context=destination)
+
+    def _set_fetching_state(self, destination_id: str, *, reason: str) -> None:
+        state = self._state_by_dest_id.setdefault(destination_id, _DestinationState())
+        now = time.time()
+        previous = state.current_state
+        destination = self._dest_context_by_id.get(destination_id)
+
+        if self._has_data_state(previous) and self._keep_stale_data_on_transition:
+            retrieved_at = previous.retrieved_at or now
+            next_state = RequestState(
+                type="stale-while-revalidate",
+                retrieved_at=retrieved_at,
+                refresh_initiated_at=now,
+            )
+        else:
+            if (
+                destination is not None
+                and self._has_data_state(previous)
+                and not self._keep_stale_data_on_transition
+            ):
+                self._publish_data_defaults(destination)
+            next_state = RequestState(type="loading", initiated_at=now)
+
+        self._set_state(destination_id, next_state, reason=reason)
 
     def _set_state(
         self,
@@ -621,6 +680,41 @@ class AsyncTap(BaseTap):
             task.cancel()
         self._retry_attempt_by_key.pop(key, None)
         self._clear_retry_at_for_key(key)
+
+    def _cancel_refresh_for_key(self, key: str) -> None:
+        task = self._refresh_tasks_by_key.pop(key, None)
+        if task is not None and not task.done():
+            task.cancel()
+
+    def _schedule_refresh_for_key(self, key: str) -> None:
+        if self._cache_ttl_ms <= 0:
+            return
+        if self._refresh_before_expiry_ms <= 0:
+            return
+
+        delay_ms = self._cache_ttl_ms - self._refresh_before_expiry_ms
+        if delay_ms < 0:
+            delay_ms = 0
+
+        self._cancel_refresh_for_key(key)
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+
+        async def run_refresh() -> None:
+            try:
+                await asyncio.sleep(delay_ms / 1000.0)
+            except asyncio.CancelledError:
+                return
+            destination_ids = tuple(self._key_dest_ids.get(key, ()))
+            for destination_id in destination_ids:
+                destination = self._dest_context_by_id.get(destination_id)
+                if destination is not None:
+                    self._produce_for_destination(destination, force_refetch=True)
+
+        self._refresh_tasks_by_key[key] = loop.create_task(run_refresh())
 
     def _schedule_retry_for_key(self, key: str, error: Exception) -> None:
         config = self._retry

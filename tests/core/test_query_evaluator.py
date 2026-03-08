@@ -4,9 +4,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from grip_py.core.grip import GripRegistry
+from grip_py.core.query import Query
 from grip_py.core.query_evaluator import (
     EvaluationDelta,
     MatchedTap,
+    QueryBinding,
     QueryEvaluator,
     TapAttribution,
 )
@@ -72,3 +74,36 @@ def test_query_evaluator_diff_reports_partial_transfer() -> None:
 
     assert delta.removed[tap1].attributed_grips == {b}
     assert delta.added[tap2].attributed_grips == {b}
+
+
+def test_query_evaluator_binding_input_deltas_and_evaluation_delta() -> None:
+    registry = GripRegistry()
+    flag = registry.add("flag", "")
+    out = registry.add("out", 0)
+
+    tap = DummyTap((out,))
+    evaluator = QueryEvaluator()
+
+    add_result = evaluator.add_binding(
+        QueryBinding(id="one", query=Query({flag: "yes"}), tap=tap, base_score=1)
+    )
+    assert add_result.new_inputs == {flag}
+    assert add_result.removed_inputs == set()
+
+    snapshot_values = {flag: "yes"}
+
+    class Snapshot:
+        def get_value(self, grip):
+            return snapshot_values.get(grip)
+
+    delta = evaluator.on_grips_changed({flag}, Snapshot())
+    assert tap in delta.added
+    assert delta.added[tap].attributed_grips == {out}
+
+    snapshot_values[flag] = "no"
+    delta = evaluator.on_grips_changed({flag}, Snapshot())
+    assert tap in delta.removed
+    assert delta.removed[tap].attributed_grips == {out}
+
+    remove_result = evaluator.remove_binding("one")
+    assert remove_result.removed_inputs == {flag}

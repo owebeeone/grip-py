@@ -30,13 +30,17 @@ class SimpleResolver:
 
     def add_producer(self, context: GripContext, tap_or_factory: Tap | TapFactory) -> None:
         home_context = context.get_grip_home_context()
+        home_node = home_context._get_context_node()
 
-        if hasattr(tap_or_factory, "build") and not hasattr(tap_or_factory, "provides"):
-            tap = tap_or_factory.build()
-        else:
-            tap = tap_or_factory  # type: ignore[assignment]
+        outputs = tuple(getattr(tap_or_factory, "provides", tuple()) or ())
+        producer_record = home_node.get_or_create_producer_record(
+            tap_or_factory,
+            outputs if outputs else None,
+        )
+        tap = producer_record.tap
 
-        tap.on_attach(home_context)
+        if tap.get_home_context() is None:
+            tap.on_attach(home_context)
 
         for grip in tap.get_provides():
             self._recompute_grip(grip)
@@ -138,8 +142,10 @@ class SimpleResolver:
 
         if previous is provider_node and provider_node is not None:
             producer = provider_node.get_producers().get(grip)
-            if producer is not None and consumer_node in producer.get_destinations():
-                return
+            if producer is not None:
+                destination = producer.get_destinations().get(consumer_node)
+                if destination is not None and grip in destination.get_grips():
+                    return
 
         if previous is not None:
             previous_stack = getattr(previous, "producer_stacks", {}).get(grip)
