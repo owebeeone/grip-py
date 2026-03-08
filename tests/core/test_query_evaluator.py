@@ -22,8 +22,10 @@ class DummyTap:
 @dataclass(slots=True)
 class Snapshot:
     values: dict[Grip[Any], Any]
+    calls: int = 0
 
     def get_value(self, grip: Grip[Any]) -> Any:
+        self.calls += 1
         return self.values.get(grip)
 
 
@@ -392,3 +394,75 @@ def test_query_evaluator_removing_non_attributed_binding_is_noop_delta() -> None
     delta = _evaluate_and_check_stability(evaluator, set(), {g: "x"})
     assert delta.added == {}
     assert delta.removed == {}
+
+
+def test_query_evaluator_ignores_unaffected_changed_grips() -> None:
+    registry = GripRegistry()
+    g1 = registry.add("G1", "")
+    g2 = registry.add("G2", "")
+    unrelated = registry.add("Unrelated", "")
+    out1 = registry.add("Out1", 0)
+    out2 = registry.add("Out2", 0)
+
+    evaluator = QueryEvaluator()
+    evaluator.add_binding(QueryBinding(id="A", query=with_one_of(g1, "x").build(), tap=DummyTap((out1,))))
+    evaluator.add_binding(QueryBinding(id="B", query=with_one_of(g2, "y").build(), tap=DummyTap((out2,))))
+
+    _evaluate_and_check_stability(evaluator, {g1, g2}, {g1: "x", g2: "y"})
+
+    snapshot = Snapshot({g1: "x", g2: "y", unrelated: "z"})
+    delta = evaluator.on_grips_changed({unrelated}, snapshot)
+    assert delta.added == {}
+    assert delta.removed == {}
+    assert snapshot.calls == 0
+
+
+def test_query_evaluator_cache_reuses_attribution_for_same_input_values() -> None:
+    registry = GripRegistry()
+    g = registry.add("G", "")
+    out = registry.add("Out", 0)
+    evaluator = QueryEvaluator(use_cache=True)
+    evaluator.add_binding(QueryBinding(id="A", query=with_one_of(g, "x", 10.0).build(), tap=DummyTap((out,))))
+
+    calls = 0
+    original_attribute = evaluator.attribute
+
+    def counted(matches):
+        nonlocal calls
+        calls += 1
+        return original_attribute(matches)
+
+    evaluator.attribute = counted  # type: ignore[method-assign]
+
+    values = {g: "x"}
+    evaluator.on_grips_changed({g}, Snapshot(values))
+    evaluator.on_grips_changed({g}, Snapshot(values))
+    assert calls == 1
+
+
+def test_query_evaluator_cache_invalidates_on_structural_change() -> None:
+    registry = GripRegistry()
+    g = registry.add("G", "")
+    out1 = registry.add("Out1", 0)
+    out2 = registry.add("Out2", 0)
+
+    evaluator = QueryEvaluator(use_cache=True)
+    evaluator.add_binding(QueryBinding(id="A", query=with_one_of(g, "x").build(), tap=DummyTap((out1,))))
+
+    calls = 0
+    original_attribute = evaluator.attribute
+
+    def counted(matches):
+        nonlocal calls
+        calls += 1
+        return original_attribute(matches)
+
+    evaluator.attribute = counted  # type: ignore[method-assign]
+
+    values = {g: "x"}
+    evaluator.on_grips_changed({g}, Snapshot(values))
+    assert calls == 1
+
+    evaluator.add_binding(QueryBinding(id="B", query=with_one_of(g, "x").build(), tap=DummyTap((out2,))))
+    evaluator.on_grips_changed(set(), Snapshot(values))
+    assert calls == 2

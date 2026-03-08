@@ -69,28 +69,78 @@ class ContextSnapshot(Protocol):
 
 
 class QueryEvaluator:
-    """Evaluator for query bindings with deterministic attribution."""
+    """Evaluator for query bindings with deterministic attribution.
 
-    def __init__(self) -> None:
+    Optimizations implemented:
+    - Incremental re-evaluation of only affected bindings.
+    - Structural-change tracking for add/remove/replace bindings.
+    - Optional attribution-result cache keyed by current input values.
+    """
+
+    def __init__(self, *, use_cache: bool = True) -> None:
         self._bindings: dict[str, QueryBinding] = {}
+        self._bindings_by_input: dict[Grip[Any], set[str]] = {}
+        self._input_grip_ref_counts: dict[Grip[Any], int] = {}
+        self._active_matches: dict[str, MatchedTap] = {}
         self._active_attributions: dict[Any, TapAttribution] = {}
+        self._structurally_changed_binding_ids: set[str] = set()
+        self._has_structural_changes = False
+        self._use_cache = use_cache
+        self._cache: dict[tuple[Any, ...], dict[Any, TapAttribution]] = {}
+        self._cache_key_grips: tuple[Grip[Any], ...] = ()
 
     def add_binding(self, binding: QueryBinding) -> AddBindingResult:
         """Add or replace a binding and return input subscription deltas."""
-        before_inputs = self._all_inputs()
+        removed_inputs: set[Grip[Any]] = set()
+        if binding.id in self._bindings:
+            removed_inputs = self.remove_binding(binding.id).removed_inputs
+
         self._bindings[binding.id] = binding
-        after_inputs = self._all_inputs()
+        new_inputs: set[Grip[Any]] = set()
+        for grip in binding.query.conditions.keys():
+            count = self._input_grip_ref_counts.get(grip, 0)
+            if count == 0:
+                new_inputs.add(grip)
+            self._input_grip_ref_counts[grip] = count + 1
+            self._bindings_by_input.setdefault(grip, set()).add(binding.id)
+
+        self._cache_key_grips = self._sorted_input_grips()
+        self._structurally_changed_binding_ids.add(binding.id)
+        self._has_structural_changes = True
+        self._cache.clear()
+
         return AddBindingResult(
-            new_inputs=after_inputs - before_inputs,
-            removed_inputs=before_inputs - after_inputs,
+            new_inputs=new_inputs,
+            removed_inputs=removed_inputs,
         )
 
     def remove_binding(self, binding_id: str) -> RemoveBindingResult:
         """Remove a binding and return input grips no longer needed."""
-        before_inputs = self._all_inputs()
-        self._bindings.pop(binding_id, None)
-        after_inputs = self._all_inputs()
-        return RemoveBindingResult(removed_inputs=before_inputs - after_inputs)
+        binding = self._bindings.pop(binding_id, None)
+        if binding is None:
+            return RemoveBindingResult()
+
+        removed_inputs: set[Grip[Any]] = set()
+        for grip in binding.query.conditions.keys():
+            refs = self._bindings_by_input.get(grip)
+            if refs is not None:
+                refs.discard(binding_id)
+                if not refs:
+                    self._bindings_by_input.pop(grip, None)
+
+            count = self._input_grip_ref_counts.get(grip, 0)
+            if count <= 1:
+                self._input_grip_ref_counts.pop(grip, None)
+                removed_inputs.add(grip)
+            else:
+                self._input_grip_ref_counts[grip] = count - 1
+
+        self._active_matches.pop(binding_id, None)
+        self._structurally_changed_binding_ids.discard(binding_id)
+        self._has_structural_changes = True
+        self._cache_key_grips = self._sorted_input_grips()
+        self._cache.clear()
+        return RemoveBindingResult(removed_inputs=removed_inputs)
 
     def get_binding(self, binding_id: str) -> QueryBinding | None:
         return self._bindings.get(binding_id)
@@ -100,10 +150,33 @@ class QueryEvaluator:
         changed_grips: set[Grip[Any]],
         snapshot: ContextSnapshot,
     ) -> EvaluationDelta:
-        """Re-evaluate current bindings and return producer attribution delta."""
-        current = self.evaluate(snapshot.get_value)
+        """Re-evaluate affected bindings and return producer attribution delta."""
+        bindings_to_reevaluate = set(self._structurally_changed_binding_ids)
+        for grip in changed_grips:
+            bindings_to_reevaluate.update(self._bindings_by_input.get(grip, ()))
+
+        if not bindings_to_reevaluate and not self._has_structural_changes:
+            return EvaluationDelta()
+
+        for binding_id in bindings_to_reevaluate:
+            binding = self._bindings.get(binding_id)
+            if binding is None:
+                continue
+            score = binding.query.match_score(snapshot.get_value)
+            if score is None:
+                self._active_matches.pop(binding_id, None)
+                continue
+            self._active_matches[binding_id] = MatchedTap(
+                tap=binding.tap,
+                score=float(binding.base_score) + float(score),
+                binding_id=binding.id,
+            )
+
+        self._structurally_changed_binding_ids.clear()
+        current = self._attribute_active_matches(snapshot)
         delta = self.diff(self._active_attributions, current)
         self._active_attributions = current
+        self._has_structural_changes = False
         return delta
 
     def evaluate(self, get_value: Callable[[Grip[Any]], Any]) -> dict[Any, TapAttribution]:
@@ -184,7 +257,34 @@ class QueryEvaluator:
         return EvaluationDelta(added=added, removed=removed)
 
     def _all_inputs(self) -> set[Grip[Any]]:
-        inputs: set[Grip[Any]] = set()
-        for binding in self._bindings.values():
-            inputs.update(binding.query.conditions.keys())
-        return inputs
+        return set(self._input_grip_ref_counts.keys())
+
+    def _attribute_active_matches(self, snapshot: ContextSnapshot) -> dict[Any, TapAttribution]:
+        if not self._use_cache:
+            return self.attribute(self._active_matches.values())
+
+        cache_key = self._make_cache_key(snapshot)
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        attributed = self.attribute(self._active_matches.values())
+        self._cache[cache_key] = attributed
+        return attributed
+
+    def _make_cache_key(self, snapshot: ContextSnapshot) -> tuple[Any, ...]:
+        return tuple(
+            self._normalize_cache_value(snapshot.get_value(grip))
+            for grip in self._cache_key_grips
+        )
+
+    @staticmethod
+    def _normalize_cache_value(value: Any) -> Any:
+        try:
+            hash(value)
+        except TypeError:
+            return ("id", id(value))
+        return ("value", value)
+
+    def _sorted_input_grips(self) -> tuple[Grip[Any], ...]:
+        return tuple(sorted(self._input_grip_ref_counts.keys(), key=lambda grip: grip.key))
