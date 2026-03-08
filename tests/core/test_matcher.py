@@ -6,7 +6,7 @@ from grip_py.core.atom_tap import create_atom_value_tap, create_multi_atom_value
 from grip_py.core.grok import Grok
 from grip_py.core.grip import Grip, GripRegistry
 from grip_py.core.matcher import TapMatcher
-from grip_py.core.query import Query
+from grip_py.core.query import with_one_of
 from grip_py.core.query_evaluator import QueryBinding
 
 
@@ -46,8 +46,12 @@ def test_tap_matcher_switches_taps_based_on_home_query_values() -> None:
     tap_b = create_multi_atom_value_tap({out: 2})
 
     matcher = TapMatcher(home, presentation)
-    matcher.add_binding(QueryBinding(id="a", query=Query({selector: "a"}), tap=tap_a, base_score=1))
-    matcher.add_binding(QueryBinding(id="b", query=Query({selector: "b"}), tap=tap_b, base_score=1))
+    matcher.add_binding(
+        QueryBinding(id="a", query=with_one_of(selector, "a").build(), tap=tap_a, base_score=1)
+    )
+    matcher.add_binding(
+        QueryBinding(id="b", query=with_one_of(selector, "b").build(), tap=tap_b, base_score=1)
+    )
 
     drip = grok.query(out, presentation)
     assert drip.get() == 0
@@ -82,7 +86,7 @@ def test_tap_matcher_supports_factory_bindings() -> None:
     matcher.add_binding(
         QueryBinding(
             id="factory",
-            query=Query({selector: lambda value: value == "x"}),
+            query=with_one_of(selector, "x").build(),
             tap=factory,
             base_score=1,
         )

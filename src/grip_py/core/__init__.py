@@ -36,7 +36,15 @@ from .grok import Grok, GrokImpl, GrokProtocol
 from .grip import Grip, GripRegistry
 from .interfaces import Resolver
 from .matcher import MatchingContext, TapMatcher
-from .query import Query
+from .query import (
+    Query,
+    QueryBuilder,
+    QueryBuilderFactory,
+    QueryConditions,
+    QueryMatchScoreMap,
+    with_any_of,
+    with_one_of,
+)
 from .query_evaluator import (
     AddBindingResult,
     EvaluationDelta,
@@ -108,6 +116,12 @@ __all__ = [
     "get_retry_time_remaining",
     "get_status_message",
     "Query",
+    "QueryBuilder",
+    "QueryBuilderFactory",
+    "QueryConditions",
+    "QueryMatchScoreMap",
+    "with_one_of",
+    "with_any_of",
     "QueryBinding",
     "AddBindingResult",
     "RemoveBindingResult",

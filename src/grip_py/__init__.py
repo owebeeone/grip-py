@@ -33,6 +33,10 @@ from .core import (
     MatchingContext,
     MatchedTap,
     Query,
+    QueryBuilder,
+    QueryBuilderFactory,
+    QueryConditions,
+    QueryMatchScoreMap,
     QueryBinding,
     RemoveBindingResult,
     MultiAtomValueTap,
@@ -70,6 +74,8 @@ from .core import (
     create_multi_atom_value_tap,
     use_grip,
     watch_drip,
+    with_any_of,
+    with_one_of,
 )
 
 __all__ = [
@@ -84,6 +90,10 @@ __all__ = [
     "GrokProtocol",
     "Resolver",
     "Query",
+    "QueryBuilder",
+    "QueryBuilderFactory",
+    "QueryConditions",
+    "QueryMatchScoreMap",
     "QueryBinding",
     "AddBindingResult",
     "RemoveBindingResult",
@@ -142,4 +152,6 @@ __all__ = [
     "create_async_tap",
     "use_grip",
     "watch_drip",
+    "with_one_of",
+    "with_any_of",
 ]
