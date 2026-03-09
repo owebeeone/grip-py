@@ -240,7 +240,14 @@ class TaskQueue:
             return
 
         try:
-            loop.call_soon(self.flush)
+            try:
+                running = asyncio.get_running_loop()
+            except RuntimeError:
+                running = None
+            if running is loop:
+                loop.call_soon(self.flush)
+            else:
+                loop.call_soon_threadsafe(self.flush)
         except RuntimeError:
             with self._lock:
                 self._scheduled = False

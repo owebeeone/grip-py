@@ -341,7 +341,7 @@ class GripContextNode:
         if live is not None:
             return live
 
-        drip = Drip(initial=grip.default)
+        drip = Drip(initial=grip.default, loop=self.grok.get_async_loop())
         self.record_consumer(grip, drip)
 
         def on_zero() -> None:

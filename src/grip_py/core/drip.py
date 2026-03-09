@@ -8,9 +8,10 @@ import logging
 import threading
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Generic, Literal, TypeVar
+from typing import Generic, Literal, TypeVar, cast
 
 T = TypeVar("T")
+R = TypeVar("R")
 
 ErrorPolicy = Literal["log", "raise", "collect"]
 ElidePolicy = Literal["ts", "equality", "none"]
@@ -20,6 +21,8 @@ VoidCallback = Callable[[], None]
 
 _SCALAR_TYPES = (type(None), bool, int, float, str, bytes)
 _LOGGER = logging.getLogger(__name__)
+_GLOBAL_CANCELLED_TASKS: set[asyncio.Task[None]] = set()
+_GLOBAL_CANCELLED_TASKS_LOCK = threading.Lock()
 
 
 @dataclass(slots=True, eq=False)
@@ -57,6 +60,7 @@ class Drip(Generic[T]):
         error_policy: ErrorPolicy = "log",
         elide_policy: ElidePolicy = "ts",
         callback_error_handler: Callable[[Exception], None] | None = None,
+        loop: asyncio.AbstractEventLoop | None = None,
     ) -> None:
         if error_policy not in {"log", "raise", "collect"}:
             raise ValueError(f"Unsupported error_policy: {error_policy!r}")
@@ -76,7 +80,7 @@ class Drip(Generic[T]):
 
         self._enqueued = False
         self._zero_check_scheduled = False
-        self._loop: asyncio.AbstractEventLoop | None = None
+        self._loop: asyncio.AbstractEventLoop | None = loop
         self._callback_errors: list[Exception] = []
         self._lock = threading.RLock()
 
@@ -145,27 +149,50 @@ class Drip(Generic[T]):
 
     def subscribe_async(self, fn: AsyncSubscriber[T]) -> Callable[[], None]:
         """Subscribe using an async callback with per-subscriber ordered delivery."""
-        loop = self._require_bound_running_loop()
+        loop = self._resolve_loop_for_async_subscription()
         subscription: _AsyncSubscription[T] = _AsyncSubscription(fn)
 
-        with self._lock:
-            was_empty = not self._has_any_subscribers_unlocked()
-            self._async_subs.add(subscription)
-            first_callbacks = tuple(self._first_sub_callbacks) if was_empty else ()
-            current = self._value
+        def register() -> tuple[VoidCallback, ...]:
+            with self._lock:
+                was_empty = not self._has_any_subscribers_unlocked()
+                self._async_subs.add(subscription)
+                first_callbacks = tuple(self._first_sub_callbacks) if was_empty else ()
+                current = self._value
+            subscription.task = loop.create_task(self._run_async_subscription(subscription))
+            subscription.queue.put_nowait(current)
+            return first_callbacks
 
-        subscription.task = loop.create_task(self._run_async_subscription(subscription))
+        first_callbacks = self._run_on_loop(loop, register)
         if first_callbacks:
             self._invoke_void_callbacks(first_callbacks)
-        subscription.queue.put_nowait(current)
 
         def unsubscribe() -> None:
-            removed = self._remove_async_subscriber(subscription)
-            if removed:
-                task = subscription.task
-                if task is not None and not task.done():
-                    task.cancel()
+            try:
+                running = asyncio.get_running_loop()
+            except RuntimeError:
+                running = None
+
+            if running is loop:
+                removed = self._remove_async_subscriber(subscription)
+                if not removed:
+                    return
+                self._cancel_subscription_task(subscription.task)
                 self._schedule_zero_check_if_needed()
+                return
+
+            if loop.is_closed():
+                removed = self._remove_async_subscriber(subscription)
+                if not removed:
+                    return
+                self._cancel_subscription_task(subscription.task)
+                self._schedule_zero_check_if_needed()
+                return
+
+            future = asyncio.run_coroutine_threadsafe(
+                self._unsubscribe_async_subscription(subscription),
+                loop,
+            )
+            future.result()
 
         return unsubscribe
 
@@ -189,9 +216,7 @@ class Drip(Generic[T]):
             self._async_subs.clear()
             self._enqueued = False
             zero_callbacks = tuple(self._zero_sub_callbacks)
-        for subscription in async_subs:
-            if subscription.task is not None and not subscription.task.done():
-                subscription.task.cancel()
+        self._cancel_async_subscriptions_blocking(async_subs)
         if had_subscribers:
             self._invoke_void_callbacks(zero_callbacks)
 
@@ -354,19 +379,47 @@ class Drip(Generic[T]):
                 pass
         callback()
 
-    def _require_bound_running_loop(self) -> asyncio.AbstractEventLoop:
+    def _resolve_loop_for_async_subscription(self) -> asyncio.AbstractEventLoop:
+        loop = self._get_or_bind_loop()
+        if loop is None:
+            raise RuntimeError(
+                "subscribe_async requires a bound event loop or an active running asyncio event loop"
+            )
+        if not loop.is_running():
+            raise RuntimeError("subscribe_async requires a running event loop")
+        return loop
+
+    def _run_on_loop(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        fn: Callable[[], R],
+    ) -> R:
         try:
             running = asyncio.get_running_loop()
-        except RuntimeError as exc:
-            raise RuntimeError(
-                "subscribe_async requires an active running asyncio event loop"
-            ) from exc
-        loop = self._get_or_bind_loop()
-        if loop is None or not loop.is_running() or loop is not running:
-            raise RuntimeError(
-                "subscribe_async must be called from the drip's bound event loop thread"
-            )
-        return loop
+        except RuntimeError:
+            running = None
+
+        if running is loop:
+            return fn()
+
+        done = threading.Event()
+        result: dict[str, object] = {}
+
+        def wrapper() -> None:
+            try:
+                result["value"] = fn()
+            except Exception as exc:  # pragma: no cover - exercised through callers
+                result["error"] = exc
+            finally:
+                done.set()
+
+        loop.call_soon_threadsafe(wrapper)
+        done.wait()
+
+        error = result.get("error")
+        if isinstance(error, Exception):
+            raise error
+        return cast(R, result.get("value"))
 
     def _get_or_bind_loop(self) -> asyncio.AbstractEventLoop | None:
         with self._lock:
@@ -398,3 +451,67 @@ class Drip(Generic[T]):
         if isinstance(old, _SCALAR_TYPES) and isinstance(new, _SCALAR_TYPES):
             return old == new
         return old is new
+
+    def _cancel_subscription_task(self, task: asyncio.Task[None] | None) -> None:
+        if task is None or task.done():
+            return
+        with _GLOBAL_CANCELLED_TASKS_LOCK:
+            _GLOBAL_CANCELLED_TASKS.add(task)
+        task.add_done_callback(self._drop_cancelled_task_ref)
+        task.cancel()
+
+    @staticmethod
+    def _drop_cancelled_task_ref(task: asyncio.Task[None]) -> None:
+        with _GLOBAL_CANCELLED_TASKS_LOCK:
+            _GLOBAL_CANCELLED_TASKS.discard(task)
+
+    async def _unsubscribe_async_subscription(
+        self,
+        subscription: _AsyncSubscription[T],
+    ) -> None:
+        removed = self._remove_async_subscriber(subscription)
+        if not removed:
+            return
+        await self._cancel_and_await_tasks((subscription.task,))
+        self._schedule_zero_check_if_needed()
+
+    async def _cancel_and_await_tasks(
+        self,
+        tasks: tuple[asyncio.Task[None] | None, ...],
+    ) -> None:
+        to_wait: list[asyncio.Task[None]] = []
+        for task in tasks:
+            if task is None or task.done():
+                continue
+            self._cancel_subscription_task(task)
+            to_wait.append(task)
+        if not to_wait:
+            return
+        await asyncio.gather(*to_wait, return_exceptions=True)
+
+    def _cancel_async_subscriptions_blocking(
+        self,
+        subscriptions: tuple[_AsyncSubscription[T], ...],
+    ) -> None:
+        tasks = tuple(subscription.task for subscription in subscriptions)
+        if not tasks:
+            return
+
+        loop = self._get_or_bind_loop()
+        if loop is None or not loop.is_running() or loop.is_closed():
+            for task in tasks:
+                self._cancel_subscription_task(task)
+            return
+
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+
+        if running is loop:
+            for task in tasks:
+                self._cancel_subscription_task(task)
+            return
+
+        future = asyncio.run_coroutine_threadsafe(self._cancel_and_await_tasks(tasks), loop)
+        future.result()

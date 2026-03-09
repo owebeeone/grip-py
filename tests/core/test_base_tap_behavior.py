@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -14,6 +15,15 @@ class ProduceEvent:
     dest_context_id: str | None
     home_value: Any
     dest_value: Any
+
+
+def _wait_until(predicate, timeout: float = 1.0) -> None:
+    start = time.perf_counter()
+    while time.perf_counter() - start < timeout:
+        if predicate():
+            return
+        time.sleep(0.005)
+    raise AssertionError("condition not satisfied before timeout")
 
 
 class ParamEchoTap(BaseTap):
@@ -78,6 +88,7 @@ def test_destination_param_change_recomputes_only_affected_destination():
     tap.events.clear()
     c1_source.set(33)
 
+    _wait_until(lambda: d1.get() == 33)
     assert d1.get() == 33
     assert d2.get() == 20
     assert tap.events
@@ -106,6 +117,7 @@ def test_home_param_change_recomputes_all_destinations():
     tap.events.clear()
     home_source.set(12)
 
+    _wait_until(lambda: d1.get() == 12 and d2.get() == 12)
     assert d1.get() == 12
     assert d2.get() == 12
     assert tap.events

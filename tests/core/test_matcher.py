@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 
 from grip_py.core.atom_tap import create_atom_value_tap, create_multi_atom_value_tap
@@ -30,6 +31,15 @@ def _resolved_tap(ctx, grip: Grip[int]):
     return producer.tap if producer is not None else None
 
 
+def _wait_until(predicate, timeout: float = 1.0) -> None:
+    start = time.perf_counter()
+    while time.perf_counter() - start < timeout:
+        if predicate():
+            return
+        time.sleep(0.005)
+    raise AssertionError("condition not satisfied before timeout")
+
+
 def test_tap_matcher_switches_taps_based_on_home_query_values() -> None:
     registry = GripRegistry()
     selector = registry.add("Selector", "none")
@@ -57,14 +67,17 @@ def test_tap_matcher_switches_taps_based_on_home_query_values() -> None:
     assert drip.get() == 0
 
     selector_source.set("a")
+    _wait_until(lambda: drip.get() == 1 and _resolved_tap(presentation, out) is tap_a)
     assert drip.get() == 1
     assert _resolved_tap(presentation, out) is tap_a
 
     selector_source.set("b")
+    _wait_until(lambda: drip.get() == 2 and _resolved_tap(presentation, out) is tap_b)
     assert drip.get() == 2
     assert _resolved_tap(presentation, out) is tap_b
 
     selector_source.set("none")
+    _wait_until(lambda: _resolved_tap(presentation, out) is None)
     assert _resolved_tap(presentation, out) is None
 
 
@@ -96,12 +109,15 @@ def test_tap_matcher_supports_factory_bindings() -> None:
     assert drip.get() == 0
 
     selector_source.set("x")
+    _wait_until(lambda: drip.get() == 9)
     assert drip.get() == 9
     assert factory.build_count == 1
 
     selector_source.set("none")
+    _wait_until(lambda: _resolved_tap(presentation, out) is None)
     assert _resolved_tap(presentation, out) is None
 
     selector_source.set("x")
+    _wait_until(lambda: drip.get() == 9 and factory.build_count == 2)
     assert drip.get() == 9
     assert factory.build_count == 2

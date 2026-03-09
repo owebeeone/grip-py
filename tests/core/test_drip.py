@@ -165,6 +165,42 @@ def test_drip_next_threadsafe_from_worker_thread():
     asyncio.run(scenario())
 
 
+def test_drip_subscribe_async_from_worker_thread_on_bound_loop():
+    async def scenario():
+        loop = asyncio.get_running_loop()
+        drip = Drip[int](0, elide_policy="none", loop=loop)
+        seen: list[int | None] = []
+        done = asyncio.Event()
+        errors: list[Exception] = []
+        holder: dict[str, object] = {}
+
+        async def on_value(value: int | None) -> None:
+            seen.append(value)
+            if value == 2:
+                done.set()
+
+        def worker() -> None:
+            try:
+                holder["unsubscribe"] = drip.subscribe_async(on_value)
+            except Exception as exc:  # pragma: no cover - exercised in assertion
+                errors.append(exc)
+
+        await asyncio.to_thread(worker)
+        assert errors == []
+
+        drip.next(1)
+        drip.next(2)
+        await asyncio.wait_for(done.wait(), timeout=1.0)
+
+        unsubscribe = holder.get("unsubscribe")
+        assert callable(unsubscribe)
+        unsubscribe()
+        await asyncio.sleep(0)
+        assert seen == [0, 1, 2]
+
+    asyncio.run(scenario())
+
+
 def test_drip_performance_messages_in_0p1_seconds():
     drip = Drip[int](0, error_policy="raise", elide_policy="none")
     callback_count = 0
@@ -222,6 +258,7 @@ def test_drip_subscribe_async_immediate_and_ordered_delivery():
         await asyncio.wait_for(done.wait(), timeout=1.0)
         assert seen == [0, 1, 2, 3]
         unsubscribe()
+        await asyncio.sleep(0)
 
     asyncio.run(scenario())
 
@@ -263,6 +300,7 @@ def test_drip_subscribe_async_error_policy_collect():
         drip.next(1)
         await asyncio.sleep(0.01)
         unsubscribe()
+        await asyncio.sleep(0)
 
         errors = drip.get_callback_errors()
         assert len(errors) == 1

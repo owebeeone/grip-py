@@ -1,6 +1,17 @@
+import time
+
 from grip_py.core.atom_tap import create_atom_value_tap
 from grip_py.core.grok import Grok
 from grip_py.core.grip import GripRegistry
+
+
+def _wait_until(predicate, timeout: float = 1.0) -> None:
+    start = time.perf_counter()
+    while time.perf_counter() - start < timeout:
+        if predicate():
+            return
+        time.sleep(0.005)
+    raise AssertionError("condition not satisfied before timeout")
 
 
 def test_query_returns_same_drip_for_same_context_and_grip():
@@ -36,7 +47,7 @@ def test_first_and_zero_subscriber_callbacks_fire():
     u1()
     assert counts["zero"] == 0
     u2()
-    grok.flush()
+    _wait_until(lambda: counts["zero"] == 1)
     assert counts["zero"] == 1
 
 

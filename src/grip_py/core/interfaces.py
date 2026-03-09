@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable, Iterable
 from typing import Any, Protocol, runtime_checkable
 
@@ -243,3 +244,5 @@ class Grok(Protocol):
     def notify_consumers(self, dest_ctx: GripContext, grip: Grip[Any], value: Any) -> int: ...
 
     def get_graph(self) -> dict[str, GripContextNode]: ...
+
+    def get_async_loop(self) -> asyncio.AbstractEventLoop: ...

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Any
 
+from .async_loop import get_shared_async_loop
 from .context import GripContext, GripContextLike
 from .drip import Drip
 from .grip import Grip, GripRegistry
@@ -30,7 +32,9 @@ class GrokImpl:
 
     _registry: GripRegistry
     _graph: GrokGraph
+    _async_loop: asyncio.AbstractEventLoop
     _task_queue: TaskQueue
+    _closed: bool
     resolver: Resolver
     root_context: GripContext
     main_home_context: GripContext
@@ -38,8 +42,10 @@ class GrokImpl:
 
     def __init__(self, registry: GripRegistry):
         self._registry = registry
+        self._async_loop = get_shared_async_loop()
         self._graph = GrokGraph(self)
-        self._task_queue = TaskQueue(auto_flush=True)
+        self._task_queue = TaskQueue(auto_flush=True, loop=self._async_loop)
+        self._closed = False
         self.resolver = SimpleResolver(self)
 
         self.root_context = GripContext(self, "root")
@@ -80,6 +86,10 @@ class GrokImpl:
     def get_task_queue(self) -> TaskQueue:
         """Return the internal task queue."""
         return self._task_queue
+
+    def get_async_loop(self) -> asyncio.AbstractEventLoop:
+        """Return the internal asyncio loop used for runtime subscriptions."""
+        return self._async_loop
 
     def flush(self) -> None:
         """Synchronously flush queued tasks."""
@@ -147,3 +157,27 @@ class GrokImpl:
     def gc_sweep(self) -> None:
         """Run a graph GC sweep to drop unreachable nodes/drips."""
         self._graph.gc_sweep()
+
+    def close(self) -> None:
+        """Detach taps/subscriptions and release runtime-owned resources."""
+        if self._closed:
+            return
+        self._closed = True
+
+        for node in tuple(self._graph.snapshot().values()):
+            for record in set(node.producer_by_tap.values()):
+                record.detach()
+            node.producer_by_tap.clear()
+            node.producer_stacks.clear()
+            node.producers.clear()
+
+            for drip in tuple(node.consumers.values()):
+                drip.unsubscribe_all()
+            node.consumers.clear()
+            node.resolved_providers.clear()
+
+    def __del__(self) -> None:  # pragma: no cover - best effort cleanup
+        try:
+            self.close()
+        except Exception:
+            pass

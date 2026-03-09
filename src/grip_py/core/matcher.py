@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from threading import RLock
 from typing import Any
 
 from .context import GripContext
@@ -28,6 +29,7 @@ class TapMatcher:
     _values_map: dict[Grip[Any], Any]
     _changed_grips: set[Grip[Any]]
     _drip_subscriptions: dict[Grip[Any], Any]
+    _lock: RLock
 
     def __init__(self, home_context: GripContext, presentation_context: GripContext):
         self._home_context = home_context
@@ -36,27 +38,30 @@ class TapMatcher:
         self._values_map = {}
         self._changed_grips = set()
         self._drip_subscriptions = {}
+        self._lock = RLock()
 
     def add_binding(self, binding: QueryBinding) -> None:
-        result: AddBindingResult = self._evaluator.add_binding(binding)
-        for grip in result.new_inputs:
-            self._subscribe_to_grip(grip)
-        for grip in result.removed_inputs:
-            self._unsubscribe_from_grip(grip)
+        with self._lock:
+            result: AddBindingResult = self._evaluator.add_binding(binding)
+            for grip in result.new_inputs:
+                self._subscribe_to_grip(grip)
+            for grip in result.removed_inputs:
+                self._unsubscribe_from_grip(grip)
 
-        self._changed_grips.update(binding.query.conditions.keys())
-        self._evaluate()
+            self._changed_grips.update(binding.query.conditions.keys())
+            self._evaluate()
 
     def remove_binding(self, binding_id: str) -> None:
-        binding = self._evaluator.get_binding(binding_id)
-        if binding is not None:
-            self._changed_grips.update(binding.query.conditions.keys())
+        with self._lock:
+            binding = self._evaluator.get_binding(binding_id)
+            if binding is not None:
+                self._changed_grips.update(binding.query.conditions.keys())
 
-        result: RemoveBindingResult = self._evaluator.remove_binding(binding_id)
-        self._evaluate()
+            result: RemoveBindingResult = self._evaluator.remove_binding(binding_id)
+            self._evaluate()
 
-        for grip in result.removed_inputs:
-            self._unsubscribe_from_grip(grip)
+            for grip in result.removed_inputs:
+                self._unsubscribe_from_grip(grip)
 
     def _subscribe_to_grip(self, grip: Grip[Any]) -> None:
         if grip in self._drip_subscriptions:
@@ -68,12 +73,13 @@ class TapMatcher:
         self._values_map[grip] = drip.get()
         self._changed_grips.add(grip)
 
-        def on_change(value: Any) -> None:
-            self._values_map[grip] = value
-            self._changed_grips.add(grip)
-            self._evaluate()
+        async def on_change(value: Any, *, changed_grip: Grip[Any] = grip) -> None:
+            with self._lock:
+                self._values_map[changed_grip] = value
+                self._changed_grips.add(changed_grip)
+                self._evaluate()
 
-        self._drip_subscriptions[grip] = drip.subscribe_priority(on_change)
+        self._drip_subscriptions[grip] = drip.subscribe_async(on_change)
 
     def _unsubscribe_from_grip(self, grip: Grip[Any]) -> None:
         unsubscribe = self._drip_subscriptions.pop(grip, None)

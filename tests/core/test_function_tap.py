@@ -1,7 +1,18 @@
+import time
+
 from grip_py.core.atom_tap import create_atom_value_tap
 from grip_py.core.function_tap import create_function_tap
 from grip_py.core.grok import Grok
 from grip_py.core.grip import GripRegistry
+
+
+def _wait_until(predicate, timeout: float = 1.0) -> None:
+    start = time.perf_counter()
+    while time.perf_counter() - start < timeout:
+        if predicate():
+            return
+        time.sleep(0.005)
+    raise AssertionError("condition not satisfied before timeout")
 
 
 def test_function_tap_computes_from_context_value():
@@ -70,9 +81,11 @@ def test_function_tap_recomputes_from_destination_and_home_params():
     assert d2.get() == 102
 
     c1_local.set(8)
+    _wait_until(lambda: d1.get() == 108)
     assert d1.get() == 108
     assert d2.get() == 102
 
     home_tap.set(10)
+    _wait_until(lambda: d1.get() == 18 and d2.get() == 12)
     assert d1.get() == 18
     assert d2.get() == 12
