@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Iterable
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from .drip import Drip
 from .grip import Grip
@@ -12,6 +12,9 @@ from .task_queue import TaskHandleContainer
 
 if False:  # pragma: no cover
     from .query_evaluator import EvaluationDelta
+
+TapExecutionMode = Literal["replicated", "origin-primary", "negotiated-primary"]
+TapExecutionRole = Literal["primary", "follower"]
 
 
 @runtime_checkable
@@ -46,9 +49,16 @@ class TapDestinationContext(Protocol):
 class Tap(Protocol):
     """Producer interface for graph outputs."""
 
+    id: str
     provides: tuple[Grip[Any], ...]
     destination_param_grips: tuple[Grip[Any], ...]
     home_param_grips: tuple[Grip[Any], ...]
+
+    def get_execution_mode(self) -> TapExecutionMode: ...
+
+    def get_execution_role(self) -> TapExecutionRole: ...
+
+    def set_execution_role(self, role: TapExecutionRole) -> None: ...
 
     def on_attach(self, home_context: GripContext) -> None: ...
 
@@ -246,3 +256,7 @@ class Grok(Protocol):
     def get_graph(self) -> dict[str, GripContextNode]: ...
 
     def get_async_loop(self) -> asyncio.AbstractEventLoop: ...
+
+    def allocate_origin_mutation_seq(self) -> int: ...
+
+    def get_last_origin_mutation_seq(self) -> int: ...

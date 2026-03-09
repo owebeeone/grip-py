@@ -10,7 +10,7 @@ from typing import Any
 
 from .base_tap import BaseTap
 from .grip import Grip
-from .interfaces import GripContext
+from .interfaces import GripContext, TapExecutionMode
 
 
 @dataclass(slots=True, frozen=True)
@@ -163,6 +163,7 @@ class AsyncTap(BaseTap):
         keep_stale_data_on_transition: bool = False,
         state_grip: Grip[AsyncRequestState] | None = None,
         controller_grip: Grip[AsyncTapController] | None = None,
+        execution_mode: TapExecutionMode = "origin-primary",
         fetcher: AsyncFetcher,
     ):
         provides_list = list(provides)
@@ -175,6 +176,7 @@ class AsyncTap(BaseTap):
             provides=provides_list,
             destination_param_grips=destination_param_grips,
             home_param_grips=home_param_grips,
+            execution_mode=execution_mode,
         )
         self._fetcher = fetcher
         self._request_key_of = request_key_of
@@ -240,6 +242,8 @@ class AsyncTap(BaseTap):
         super().on_detach()
 
     def produce(self, *, dest_context: GripContext | None = None) -> None:
+        if not self.can_execute_locally():
+            return
         if dest_context is not None:
             self._produce_for_destination(dest_context)
             return
@@ -257,6 +261,8 @@ class AsyncTap(BaseTap):
         *,
         force_refetch: bool = False,
     ) -> None:
+        if not self.can_execute_locally():
+            return
         loop = None
         try:
             loop = asyncio.get_running_loop()
@@ -828,6 +834,7 @@ def create_async_tap(
     keep_stale_data_on_transition: bool = False,
     state_grip: Grip[AsyncRequestState] | None = None,
     controller_grip: Grip[AsyncTapController] | None = None,
+    execution_mode: TapExecutionMode = "origin-primary",
     fetcher: AsyncFetcher,
 ) -> AsyncTap:
     """Create an ``AsyncTap`` with request sharing/caching semantics.
@@ -850,5 +857,6 @@ def create_async_tap(
         keep_stale_data_on_transition=keep_stale_data_on_transition,
         state_grip=state_grip,
         controller_grip=controller_grip,
+        execution_mode=execution_mode,
         fetcher=fetcher,
     )

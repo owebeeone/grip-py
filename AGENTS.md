@@ -3,6 +3,12 @@
 ## Scope
 This file defines repository-specific coding instructions for `grip-py`.
 
+These same Python rules should also be applied to Python Glial modules in this repository, including:
+
+- `glial-local-py`
+- `glial-net-py`
+- `glial-router-py`
+
 ## Design Rules
 - Prefer `@dataclass` for classes that primarily hold state.
 - When a class is not a good dataclass candidate (for example, protocol classes or classes requiring highly custom initialization/slots behavior), keep it as a normal class and document that choice in code review notes or PR description.

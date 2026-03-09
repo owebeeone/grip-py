@@ -64,6 +64,8 @@ class GraphDumpNodeTap:
     key: str
     type: str
     class_name: str
+    execution_mode: str | None
+    execution_role: str | None
     provides_grips: list[str]
     publisher_context: str
     destinations: list[GraphDumpTapDestination]
@@ -311,6 +313,8 @@ class GripGraphDumper:
             key=self._keys.get_tap_key(tap),
             type="Tap",
             class_name=getattr(tap.__class__, "__name__", "Tap"),
+            execution_mode=getattr(tap, "get_execution_mode", lambda: None)(),
+            execution_role=getattr(tap, "get_execution_role", lambda: None)(),
             provides_grips=[self._describe_grip(g) for g in provides],
             publisher_context=self._keys.get_context_key(home_node),
             destinations=destinations,

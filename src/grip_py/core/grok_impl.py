@@ -35,6 +35,7 @@ class GrokImpl:
     _async_loop: asyncio.AbstractEventLoop
     _task_queue: TaskQueue
     _closed: bool
+    _origin_mutation_seq: int
     resolver: Resolver
     root_context: GripContext
     main_home_context: GripContext
@@ -46,6 +47,7 @@ class GrokImpl:
         self._graph = GrokGraph(self)
         self._task_queue = TaskQueue(auto_flush=True, loop=self._async_loop)
         self._closed = False
+        self._origin_mutation_seq = 0
         self.resolver = SimpleResolver(self)
 
         self.root_context = GripContext(self, "root")
@@ -60,6 +62,15 @@ class GrokImpl:
     def get_registry(self) -> GripRegistry:
         """Return the registry bound to this Grok runtime."""
         return self._registry
+
+    def allocate_origin_mutation_seq(self) -> int:
+        """Allocate and return the next local origin mutation sequence."""
+        self._origin_mutation_seq += 1
+        return self._origin_mutation_seq
+
+    def get_last_origin_mutation_seq(self) -> int:
+        """Return the last allocated local origin mutation sequence."""
+        return self._origin_mutation_seq
 
     def has_cycle(self, new_node: GripContextNode) -> bool:
         """Return ``True`` if the graph currently contains a cycle."""

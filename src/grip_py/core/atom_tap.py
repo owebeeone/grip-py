@@ -9,6 +9,7 @@ from typing import Any
 
 from .base_tap import BaseTap
 from .grip import Grip
+from .interfaces import TapExecutionMode
 
 
 @dataclass(eq=False)
@@ -20,7 +21,7 @@ class MultiAtomValueTap(BaseTap):
     _lock: RLock = field(init=False, default_factory=RLock)
 
     def __post_init__(self, values: dict[Grip[Any], Any]) -> None:
-        super().__init__(provides=tuple(values.keys()))
+        super().__init__(provides=tuple(values.keys()), execution_mode="replicated")
         self._values = dict(values)
 
     def set(self, grip: Grip[Any], value: Any) -> None:
@@ -69,10 +70,20 @@ class AtomValueTap(MultiAtomValueTap):
 
     _grip: Grip[Any]
 
-    def __init__(self, grip: Grip[Any], initial: Any = None):
+    def __init__(
+        self,
+        grip: Grip[Any],
+        initial: Any = None,
+        *,
+        execution_mode: TapExecutionMode = "replicated",
+    ):
         value = initial if initial is not None else grip.default
         super().__init__({grip: value})
         self._grip = grip
+        self._execution_mode = execution_mode
+        self._execution_role = (
+            "follower" if execution_mode == "negotiated-primary" else "primary"
+        )
 
     def set(self, value: Any) -> None:  # type: ignore[override]
         """Set the atom value and publish it."""
@@ -91,9 +102,14 @@ class AtomValueTap(MultiAtomValueTap):
         await super().update_async(self._grip, updater)
 
 
-def create_atom_value_tap(grip: Grip[Any], *, initial: Any = None) -> AtomValueTap:
+def create_atom_value_tap(
+    grip: Grip[Any],
+    *,
+    initial: Any = None,
+    execution_mode: TapExecutionMode = "replicated",
+) -> AtomValueTap:
     """Create a single-output mutable atom tap."""
-    return AtomValueTap(grip, initial)
+    return AtomValueTap(grip, initial, execution_mode=execution_mode)
 
 
 def create_multi_atom_value_tap(values: dict[Grip[Any], Any]) -> MultiAtomValueTap:

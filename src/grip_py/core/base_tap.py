@@ -7,9 +7,17 @@ from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from threading import RLock
 from typing import Any
+from uuid import uuid4
 
 from .grip import Grip
-from .interfaces import Destination, Grok, GripContext, ProducerRecord
+from .interfaces import (
+    Destination,
+    Grok,
+    GripContext,
+    ProducerRecord,
+    TapExecutionMode,
+    TapExecutionRole,
+)
 from .tap import TapDestinationContext
 
 
@@ -17,6 +25,7 @@ from .tap import TapDestinationContext
 class BaseTap(ABC):
     """Base class for concrete taps."""
 
+    id: str = field(init=False)
     provides: tuple[Grip[Any], ...] = field(init=False)
     destination_param_grips: tuple[Grip[Any], ...] = field(init=False)
     home_param_grips: tuple[Grip[Any], ...] = field(init=False)
@@ -28,6 +37,8 @@ class BaseTap(ABC):
     _destination_param_values: dict[str, dict[Grip[Any], Any]] = field(init=False)
     _destination_param_unsubscribers: dict[str, list[Callable[[], None]]] = field(init=False)
     _param_lock: RLock = field(init=False)
+    _execution_mode: TapExecutionMode = field(init=False)
+    _execution_role: TapExecutionRole = field(init=False)
 
     def __init__(
         self,
@@ -35,7 +46,9 @@ class BaseTap(ABC):
         provides: Iterable[Grip[Any]],
         destination_param_grips: Iterable[Grip[Any]] | None = None,
         home_param_grips: Iterable[Grip[Any]] | None = None,
+        execution_mode: TapExecutionMode = "origin-primary",
     ):
+        self.id = f"tap_{uuid4().hex[:9]}"
         self.provides: tuple[Grip[Any], ...] = tuple(provides)
         if not self.provides:
             raise ValueError("Tap must provide at least one grip")
@@ -49,9 +62,25 @@ class BaseTap(ABC):
         self._destination_param_values: dict[str, dict[Grip[Any], Any]] = {}
         self._destination_param_unsubscribers: dict[str, list[Callable[[], None]]] = {}
         self._param_lock = RLock()
+        self._execution_mode = execution_mode
+        self._execution_role = (
+            "follower" if execution_mode == "negotiated-primary" else "primary"
+        )
 
     def get_home_context(self) -> GripContext | None:
         return self._home_context
+
+    def get_execution_mode(self) -> TapExecutionMode:
+        return self._execution_mode
+
+    def get_execution_role(self) -> TapExecutionRole:
+        return self._execution_role
+
+    def set_execution_role(self, role: TapExecutionRole) -> None:
+        self._execution_role = role
+
+    def can_execute_locally(self) -> bool:
+        return self._execution_mode == "replicated" or self._execution_role == "primary"
 
     def get_provides(self) -> Iterable[Grip[Any]]:
         return self.provides
@@ -99,7 +128,7 @@ class BaseTap(ABC):
 
     def publish(self, values: dict[Grip[Any], Any], dest_context: GripContext | None = None) -> int:
         """Publish output values to destination(s)."""
-        if self._producer is None or self._engine is None:
+        if not self.can_execute_locally() or self._producer is None or self._engine is None:
             return 0
 
         value_map = {grip: value for grip, value in values.items() if grip in self.provides}

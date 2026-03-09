@@ -8,7 +8,7 @@ from typing import Any, Protocol
 
 from .base_tap import BaseTap
 from .grip import Grip
-from .interfaces import GripContext
+from .interfaces import GripContext, TapExecutionMode
 
 
 @dataclass(slots=True, eq=False)
@@ -81,6 +81,7 @@ class FunctionTap(BaseTap):
         initial_state: Mapping[Grip[Any], Any]
         | Iterable[tuple[Grip[Any], Any]]
         | None = None,
+        execution_mode: TapExecutionMode = "origin-primary",
     ):
         provides_list = list(provides)
         if handle_grip is not None and handle_grip not in provides_list:
@@ -89,6 +90,7 @@ class FunctionTap(BaseTap):
             provides=tuple(provides_list),
             destination_param_grips=destination_param_grips,
             home_param_grips=home_param_grips,
+            execution_mode=execution_mode,
         )
         self._compute = compute
         self.handle_grip = handle_grip
@@ -107,6 +109,8 @@ class FunctionTap(BaseTap):
 
     def set_state(self, grip: Grip[Any], value: Any) -> None:
         """Update local state and trigger recomputation when value changed."""
+        if not self.can_execute_locally():
+            return
         previous = self._state.get(grip)
         if previous == value:
             return
@@ -115,6 +119,8 @@ class FunctionTap(BaseTap):
 
     def produce(self, *, dest_context: GripContext | None = None) -> None:
         """Compute outputs and publish to one destination or all destinations."""
+        if not self.can_execute_locally():
+            return
         if dest_context is not None:
             values = self._compute_for_context(dest_context)
             self.publish(values, dest_context=dest_context)
@@ -155,6 +161,7 @@ def create_function_tap(
     handle_grip: Grip[Any] | None = None,
     state_grips: Iterable[Grip[Any]] | None = None,
     initial_state: Mapping[Grip[Any], Any] | Iterable[tuple[Grip[Any], Any]] | None = None,
+    execution_mode: TapExecutionMode = "origin-primary",
 ) -> FunctionTap:
     """Create a ``FunctionTap`` instance from a compute callback."""
     return FunctionTap(
@@ -165,4 +172,5 @@ def create_function_tap(
         handle_grip=handle_grip,
         state_grips=state_grips,
         initial_state=initial_state,
+        execution_mode=execution_mode,
     )
