@@ -10,6 +10,28 @@ Package details:
 - Python import package: `grip_py`
 - Build backend: `hatchling`
 
+## Grip Identity
+
+Grips use canonical scoped keys:
+
+- Every grip has `scope` and `name`.
+- Canonical key format is `<scope>:<name>`.
+- Default scope is `app`.
+
+Examples:
+
+```python
+from grip_py import GripRegistry
+
+registry = GripRegistry()
+
+theme = registry.add("Theme", "light")
+session_theme = registry.add("Theme", "dark", scope="session")
+
+assert theme.key == "app:Theme"
+assert session_theme.key == "session:Theme"
+```
+
 ## Local Development
 
 ```bash

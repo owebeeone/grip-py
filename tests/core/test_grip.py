@@ -6,8 +6,9 @@ def test_grip_fields_set():
     g = registry.add("UserName", "")
 
     assert isinstance(g, Grip)
+    assert g.scope == "app"
     assert g.name == "UserName"
-    assert g.key == "UserName"
+    assert g.key == "app:UserName"
     assert g.default == ""
     assert g.data_type is str
 
@@ -20,4 +21,3 @@ def test_grip_identity_semantics():
     assert g1 is g1
     assert g1 is not g2
     assert g1 != g2
-

@@ -2,5 +2,4 @@
 
 
 class DuplicateGrip(ValueError):
-    """Raised when a grip is added with a duplicate name."""
-
+    """Raised when a grip is added with a duplicate canonical key."""
