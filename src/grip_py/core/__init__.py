@@ -34,8 +34,14 @@ from .errors import DuplicateGrip
 from .function_tap import FunctionTap, FunctionTapComputeArgs, FunctionTapHandle, create_function_tap
 from .grok import Grok, GrokImpl, GrokProtocol
 from .grip import Grip, GripRegistry
-from .interfaces import Resolver
+from .interfaces import Resolver, SharedProjectionTapSpec, SharedValueTap, TapMaterializationRegistry
+from .local_persistence import (
+    SharedProjectionSnapshot,
+    apply_shared_projection_snapshot,
+    build_shared_projection_snapshot,
+)
 from .matcher import MatchingContext, TapMatcher
+from .passive_tap import PassiveTap, create_passive_tap
 from .query import (
     Query,
     QueryBuilder,
@@ -56,6 +62,7 @@ from .query_evaluator import (
 )
 from .tap import Tap, TapDestinationContext, TapFactory
 from .tap_resolver import SimpleResolver
+from .tap_materialization_registry import DefaultTapMaterializationRegistry, is_passive_tap
 from .graph_dump import (
     GraphDump,
     GraphDumpKeyRegistry,
@@ -81,11 +88,16 @@ __all__ = [
     "GrokImpl",
     "GrokProtocol",
     "Resolver",
+    "SharedProjectionTapSpec",
+    "SharedValueTap",
+    "TapMaterializationRegistry",
     "Tap",
     "TapFactory",
     "TapDestinationContext",
     "BaseTap",
+    "PassiveTap",
     "SimpleResolver",
+    "DefaultTapMaterializationRegistry",
     "TaskHandle",
     "TaskHandleHolder",
     "TaskQueue",
@@ -141,9 +153,14 @@ __all__ = [
     "GraphDumpKeyRegistry",
     "GripGraphDumper",
     "create_atom_value_tap",
+    "create_passive_tap",
     "create_multi_atom_value_tap",
     "create_function_tap",
     "create_async_tap",
+    "build_shared_projection_snapshot",
+    "apply_shared_projection_snapshot",
+    "SharedProjectionSnapshot",
+    "is_passive_tap",
     "use_grip",
     "watch_drip",
 ]

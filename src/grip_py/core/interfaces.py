@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from .drip import Drip
@@ -15,6 +16,21 @@ if False:  # pragma: no cover
 
 TapExecutionMode = Literal["replicated", "origin-primary", "negotiated-primary"]
 TapExecutionRole = Literal["primary", "follower"]
+
+
+@dataclass(slots=True)
+class SharedProjectionTapSpec:
+    tap_id: str
+    tap_type: str
+    home_path: str
+    mode: str
+    role: str | None = None
+    provides: list[str] = field(default_factory=list)
+    home_param_grips: list[str] = field(default_factory=list)
+    destination_param_grips: list[str] = field(default_factory=list)
+    purpose: str | None = None
+    description: str | None = None
+    metadata: dict[str, Any] | None = None
 
 
 @runtime_checkable
@@ -87,6 +103,16 @@ class TapFactory(Protocol):
     provides: tuple[Grip[Any], ...]
 
     def build(self) -> Tap: ...
+
+
+@runtime_checkable
+class SharedValueTap(Protocol):
+    def set_shared_grip_value(self, grip: Grip[Any], value: Any) -> bool | None: ...
+
+
+@runtime_checkable
+class TapMaterializationRegistry(Protocol):
+    def materialize_tap(self, grok: Grok, spec: SharedProjectionTapSpec) -> Tap: ...
 
 
 @runtime_checkable
@@ -256,6 +282,14 @@ class Grok(Protocol):
     def ensure_node(self, ctx: GripContext) -> GripContextNode: ...
 
     def get_context_by_id(self, context_id: str) -> GripContext | None: ...
+
+    def get_registry(self) -> GripRegistry: ...
+
+    def get_tap_materialization_registry(self) -> TapMaterializationRegistry: ...
+
+    def set_tap_materialization_registry(self, registry: TapMaterializationRegistry) -> None: ...
+
+    def register_tap_at(self, context: GripContextLike, tap: Tap) -> None: ...
 
     def unregister_tap(self, tap: Tap) -> None: ...
 

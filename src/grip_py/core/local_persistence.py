@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from threading import Lock, Timer
 from typing import Any, Protocol, cast
 
@@ -10,10 +10,18 @@ from glial_local.types import ContextState, DripState, NewSessionRequest, Sessio
 
 from .context import GripContext
 from .grip import Grip
+from .interfaces import SharedProjectionTapSpec, SharedValueTap
 
 if False:  # pragma: no cover
     from .grok_impl import GrokImpl
     from .interfaces import Tap
+
+
+@dataclass(slots=True)
+class SharedProjectionSnapshot:
+    session_id: str | None = None
+    contexts: dict[str, ContextState] = field(default_factory=dict)
+    taps: dict[str, SharedProjectionTapSpec] = field(default_factory=dict)
 
 
 class PersistableTap(Protocol):
@@ -55,6 +63,24 @@ def _build_tap_export(tap: PersistableTap) -> TapExport:
         mode=tap.get_execution_mode(),
         role=tap.get_execution_role(),
         provides=[grip.key for grip in tap.provides],
+    )
+
+
+def _build_shared_projection_tap_spec(path: str, tap: PersistableTap) -> SharedProjectionTapSpec:
+    return SharedProjectionTapSpec(
+        tap_id=getattr(tap, "id", "tap"),
+        tap_type=type(tap).__name__,
+        home_path=path,
+        mode=tap.get_execution_mode(),
+        role=tap.get_execution_role(),
+        provides=[grip.key for grip in tap.provides],
+        home_param_grips=[grip.key for grip in getattr(tap, "home_param_grips", ())],
+        destination_param_grips=[
+            grip.key for grip in getattr(tap, "destination_param_grips", ())
+        ],
+        purpose=getattr(tap, "purpose", None),
+        description=getattr(tap, "description", None),
+        metadata=getattr(tap, "metadata", None),
     )
 
 
@@ -114,6 +140,40 @@ def build_local_persistence_snapshot(grok: GrokImpl, session_id: str) -> Session
     return snapshot
 
 
+def build_shared_projection_snapshot(grok: GrokImpl, session_id: str) -> SharedProjectionSnapshot:
+    snapshot = SharedProjectionSnapshot(session_id=session_id, contexts={}, taps={})
+    seen_taps: set[Any] = set()
+
+    for node in sorted(grok.get_graph().values(), key=lambda entry: entry.id):
+        context = _ensure_snapshot_context(
+            cast(SessionSnapshot, snapshot),
+            node.id,
+            sorted(child.id for child in node.get_children_nodes()),
+        )
+        for grip, drip in node.get_consumers().items():
+            provider_node = node.get_resolved_providers().get(grip)
+            provider_record = provider_node.get_producers().get(grip) if provider_node else None
+            tap_exports = [_build_tap_export(cast(PersistableTap, provider_record.tap))] if provider_record else []
+            value = drip.get()
+            context.drips[grip.key] = DripState(
+                grip_id=grip.key,
+                name=grip.name,
+                value=value if _is_json_persistable(value) else None,
+                taps=tap_exports,
+            )
+        for producer in node.producer_by_tap.values():
+            tap = producer.tap
+            if tap in seen_taps:
+                continue
+            seen_taps.add(tap)
+            snapshot.taps[getattr(tap, "id", f"tap:{node.id}")] = _build_shared_projection_tap_spec(
+                node.id,
+                cast(PersistableTap, tap),
+            )
+
+    return snapshot
+
+
 def _ensure_context_for_path(grok: GrokImpl, path: str) -> GripContext:
     existing = grok.get_context_by_id(path)
     if existing is not None:
@@ -147,6 +207,10 @@ def _find_persistable_tap_for_grip(
     return None
 
 
+def _ensure_grip_for_key(grok: GrokImpl, grip_id: str) -> Grip[Any]:
+    return grok.get_registry().find_or_add_by_key(grip_id)
+
+
 def apply_local_persistence_snapshot(grok: GrokImpl, snapshot: SessionSnapshot) -> None:
     paths = sorted(snapshot.contexts.keys(), key=lambda path: (path.count("/"), path))
     for path in paths:
@@ -156,14 +220,51 @@ def apply_local_persistence_snapshot(grok: GrokImpl, snapshot: SessionSnapshot) 
         context = _ensure_context_for_path(grok, path)
         context_state = snapshot.contexts[path]
         for drip_state in context_state.drips.values():
-            grip = grok.get_registry().get_by_key(drip_state.grip_id)
-            if grip is None:
-                continue
+            grip = _ensure_grip_for_key(grok, drip_state.grip_id)
             tap = _find_persistable_tap_for_grip(grok, path, grip)
             restored = tap.restore_persisted_grip_value(grip, drip_state.value) if tap else False
             if tap is not None and restored is not False:
                 continue
             context.get_or_create_consumer(grip).next(drip_state.value)
+
+
+def apply_shared_projection_snapshot(grok: GrokImpl, snapshot: SharedProjectionSnapshot) -> None:
+    materialized_taps: dict[str, Any] = {}
+
+    def _apply() -> None:
+        grok.clear_materialized_contexts()
+        paths = sorted(snapshot.contexts.keys(), key=lambda path: (path.count("/"), path))
+        for path in paths:
+            grok.retain_materialized_context(_ensure_context_for_path(grok, path))
+
+        tap_specs = sorted(
+            snapshot.taps.values(),
+            key=lambda spec: (spec.home_path.count("/"), spec.home_path, spec.tap_id),
+        )
+        for spec in tap_specs:
+            home = _ensure_context_for_path(grok, spec.home_path)
+            grok.retain_materialized_context(home)
+            tap = grok.get_tap_materialization_registry().materialize_tap(grok, spec)
+            grok.register_tap_at(home, tap)
+            materialized_taps[spec.tap_id] = tap
+
+        for path in paths:
+            context = _ensure_context_for_path(grok, path)
+            grok.retain_materialized_context(context)
+            context_state = snapshot.contexts[path]
+            for drip_state in context_state.drips.values():
+                grip = _ensure_grip_for_key(grok, drip_state.grip_id)
+                applied = False
+                for tap_export in drip_state.taps:
+                    tap = cast(SharedValueTap | None, materialized_taps.get(tap_export.tap_id))
+                    restored = tap.set_shared_grip_value(grip, drip_state.value) if tap else False
+                    if tap is not None and restored is not False:
+                        applied = True
+                        break
+                if not applied:
+                    context.get_or_create_consumer(grip).next(drip_state.value)
+
+    grok.run_with_local_persistence_suppressed(_apply)
 
 
 @dataclass(slots=True)

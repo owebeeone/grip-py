@@ -191,6 +191,30 @@ class GripRegistry:
         """Return a grip by canonical key, or ``None`` when missing."""
         return self._keys_by_key.get(key)
 
+    def find_or_add_by_key(
+        self,
+        key: str,
+        *,
+        value_type: type[Any] = object,
+        nullable: bool = True,
+    ) -> Grip[Any]:
+        """Find a grip by canonical key or create a generic one when missing."""
+        existing = self.get_by_key(key)
+        if existing is not None:
+            return existing
+        if ":" not in key:
+            raise ValueError(f"Invalid canonical grip key: {key}")
+        scope, name = key.split(":", 1)
+        if not scope or not name:
+            raise ValueError(f"Invalid canonical grip key: {key}")
+        return self.add(
+            name,
+            None,
+            scope=scope,
+            value_type=value_type,
+            nullable=nullable,
+        )
+
     @overload
     def find_or_add(self, name: str, default: T, *, scope: str = _DEFAULT_SCOPE) -> Grip[T]:
         ...

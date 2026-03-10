@@ -11,10 +11,11 @@ from .context import GripContext, GripContextLike
 from .drip import Drip
 from .grip import Grip, GripRegistry
 from .graph import GripContextNode, GrokGraph
-from .interfaces import Resolver, Tap
+from .interfaces import Resolver, Tap, TapMaterializationRegistry
 from .local_persistence import GrokLocalPersistence, LocalPersistenceAttachOptions
 from .query_evaluator import EvaluationDelta
 from .task_queue import TaskHandleContainer, TaskQueue
+from .tap_materialization_registry import DefaultTapMaterializationRegistry
 from .tap_resolver import SimpleResolver
 
 
@@ -39,6 +40,8 @@ class GrokImpl:
     _origin_mutation_seq: int
     _local_persistence: GrokLocalPersistence | None
     _local_persistence_suppressed: bool
+    _tap_materialization_registry: TapMaterializationRegistry
+    _materialized_contexts: dict[str, GripContext]
     resolver: Resolver
     root_context: GripContext
     main_home_context: GripContext
@@ -53,6 +56,8 @@ class GrokImpl:
         self._origin_mutation_seq = 0
         self._local_persistence = None
         self._local_persistence_suppressed = False
+        self._tap_materialization_registry = DefaultTapMaterializationRegistry()
+        self._materialized_contexts = {}
         self.resolver = SimpleResolver(self)
 
         self.root_context = GripContext(self, "root")
@@ -67,6 +72,14 @@ class GrokImpl:
     def get_registry(self) -> GripRegistry:
         """Return the registry bound to this Grok runtime."""
         return self._registry
+
+    def get_tap_materialization_registry(self) -> TapMaterializationRegistry:
+        """Return the registry used to materialize shared projection taps."""
+        return self._tap_materialization_registry
+
+    def set_tap_materialization_registry(self, registry: TapMaterializationRegistry) -> None:
+        """Override the registry used to materialize shared projection taps."""
+        self._tap_materialization_registry = registry
 
     def allocate_origin_mutation_seq(self) -> int:
         """Allocate and return the next local origin mutation sequence."""
@@ -178,6 +191,18 @@ class GrokImpl:
             ctx.add_parent(parent, priority)
         return ctx
 
+    def register_tap_at(self, context: GripContextLike, tap: Tap) -> None:
+        """Register a tap at a specific context."""
+        context.get_grip_home_context().register_tap(tap)
+
+    def retain_materialized_context(self, context: GripContext) -> None:
+        """Keep a strong reference to a materialized context graph node."""
+        self._materialized_contexts[context.id] = context
+
+    def clear_materialized_contexts(self) -> None:
+        """Release retained materialized contexts."""
+        self._materialized_contexts.clear()
+
     def get_context_by_id(self, context_id: str) -> GripContext | None:
         """Return a live context by deterministic id when present."""
         node = self._graph.get_node_by_id(context_id)
@@ -239,6 +264,7 @@ class GrokImpl:
             self._local_persistence.flush_now()
             self._local_persistence.detach()
             self._local_persistence = None
+        self._materialized_contexts.clear()
 
         for node in tuple(self._graph.snapshot().values()):
             for record in set(node.producer_by_tap.values()):
