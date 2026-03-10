@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import random
 from dataclasses import dataclass
 
 from .drip import Drip
@@ -20,6 +19,20 @@ class ParentContext:
 
 GripContextLike = GripContextLikeProto
 
+_CONTEXT_CHILD_SEPARATOR = "/"
+
+
+def _validate_context_name(name: str) -> None:
+    if not name:
+        raise ValueError("Context names must be non-empty and deterministic")
+    if _CONTEXT_CHILD_SEPARATOR in name:
+        raise ValueError(f"Context names must not contain '{_CONTEXT_CHILD_SEPARATOR}'")
+
+
+def compose_child_context_id(parent_id: str, name: str) -> str:
+    _validate_context_name(name)
+    return f"{parent_id}{_CONTEXT_CHILD_SEPARATOR}{name}"
+
 
 @dataclass(init=False, eq=False)
 class GripContext:
@@ -30,9 +43,10 @@ class GripContext:
     id: str
     _context_node: GripContextNode
 
-    def __init__(self, engine: Grok, context_id: str | None = None):
+    def __init__(self, engine: Grok, context_id: str):
         self._grok = engine
-        self.id = context_id or f"ctx_{random.randint(1, 2_000_000_000):x}"
+        # Context ids must be deterministic so persisted graphs can be restored faithfully.
+        self.id = context_id
         self._context_node = engine.ensure_node(self)
 
     def get_grip_consumer_context(self) -> GripContext:
@@ -88,6 +102,7 @@ class GripContext:
             raise ValueError("Cycle detected in context DAG")
 
         self._grok.resolver.add_parent(self, parent)
+        self._grok.note_local_persistence_dirty()
         return self
 
     def unlink_parent(self, parent_context: GripContext) -> GripContext:
@@ -97,13 +112,25 @@ class GripContext:
         except ValueError:
             return self
         self._grok.resolver.unlink_parent(self, parent_context)
+        self._grok.note_local_persistence_dirty()
         return self
 
-    def create_child(self, *, priority: int = 0) -> GripContext:
-        """Create a new child context linked to this context."""
-        child = GripContext(self._grok)
+    def get_child(self, name: str) -> GripContext | None:
+        """Return a named child context when it is already live."""
+        return self._grok.get_context_by_id(compose_child_context_id(self.id, name))
+
+    def create_child(self, name: str, *, priority: int = 0) -> GripContext:
+        """Create a new deterministic named child context linked to this context."""
+        if self.get_child(name) is not None:
+            raise ValueError(f"Context '{self.id}' already has a child named '{name}'")
+        child = GripContext(self._grok, compose_child_context_id(self.id, name))
         child.add_parent(self, priority)
+        self._grok.note_local_persistence_dirty()
         return child
+
+    def get_or_create_child(self, name: str, *, priority: int = 0) -> GripContext:
+        """Return a named child context, creating it when needed."""
+        return self.get_child(name) or self.create_child(name, priority=priority)
 
     def get_live_drip_for_grip(self, grip: Grip):
         """Return a live consumer drip for ``grip`` when present."""
@@ -117,10 +144,12 @@ class GripContext:
         """Register a tap/factory on this context as its home context."""
         home_ctx = self.get_grip_home_context()
         self._grok.resolver.add_producer(home_ctx, tap)
+        self._grok.note_local_persistence_dirty()
 
     def unregister_tap(self, tap: Tap) -> None:
         """Unregister a tap from the runtime."""
         self._grok.unregister_tap(tap)
+        self._grok.note_local_persistence_dirty()
 
     def unregister_source(self, grip: Grip) -> None:
         """Disconnect producer routing for a specific grip in this context."""

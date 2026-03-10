@@ -19,7 +19,7 @@ def test_async_tap_throughput_smoke_0p1s() -> None:
         seq = registry.add("Seq", 0)
         grok = Grok(registry)
 
-        ctx = grok.main_presentation_context.create_child()
+        ctx = grok.main_presentation_context.create_child("ctx_1")
         seq_source = create_atom_value_tap(seq, initial=0)
         ctx.register_tap(seq_source)
 

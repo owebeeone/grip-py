@@ -31,7 +31,7 @@ def test_function_tap_computes_from_context_value():
     f_tap = create_function_tap(provides=[out], compute=compute)
     grok.main_home_context.register_tap(f_tap)
 
-    ctx = grok.main_presentation_context.create_child()
+    ctx = grok.main_presentation_context.create_child("ctx_1")
     d = grok.query(out, ctx)
     assert d.get() == 15
 
@@ -51,8 +51,8 @@ def test_function_tap_recomputes_from_destination_and_home_params():
     home_tap = create_atom_value_tap(home, initial=100)
     grok.main_home_context.register_tap(home_tap)
 
-    c1 = grok.main_presentation_context.create_child()
-    c2 = grok.main_presentation_context.create_child()
+    c1 = grok.main_presentation_context.create_child("ctx_2")
+    c2 = grok.main_presentation_context.create_child("ctx_3")
     c1_local = create_atom_value_tap(local, initial=1)
     c2_local = create_atom_value_tap(local, initial=2)
     c1.register_tap(c1_local)

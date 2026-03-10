@@ -36,7 +36,7 @@ def test_follower_role_suppresses_function_tap_publication() -> None:
     input_grip = registry.add("Role.Input", 0)
     output_grip = registry.add("Role.Output", 0)
     grok = Grok(registry)
-    ctx = grok.main_presentation_context.create_child()
+    ctx = grok.main_presentation_context.create_child("ctx_1")
 
     source = create_atom_value_tap(input_grip, initial=3)
     grok.main_home_context.register_tap(source)

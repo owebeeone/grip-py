@@ -12,6 +12,16 @@ from .grip import Grip
 from .interfaces import TapExecutionMode
 
 
+def _is_json_persistable(value: Any) -> bool:
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return True
+    if isinstance(value, list):
+        return all(_is_json_persistable(item) for item in value)
+    if isinstance(value, dict):
+        return all(isinstance(key, str) and _is_json_persistable(item) for key, item in value.items())
+    return False
+
+
 @dataclass(eq=False)
 class MultiAtomValueTap(BaseTap):
     """Simple mutable value tap for one or more output grips."""
@@ -30,6 +40,8 @@ class MultiAtomValueTap(BaseTap):
             if grip not in self._values:
                 raise KeyError(f"Grip {grip.name!r} is not provided by this tap")
             self._values[grip] = value
+        if self._engine is not None:
+            self._engine.note_local_persistence_dirty()
         self.publish({grip: value})
 
     def get(self, grip: Grip[Any]) -> Any:
@@ -46,6 +58,8 @@ class MultiAtomValueTap(BaseTap):
                 raise KeyError(f"Grip {grip.name!r} is not provided by this tap")
             next_value = updater(self._values[grip])
             self._values[grip] = next_value
+        if self._engine is not None:
+            self._engine.note_local_persistence_dirty()
         self.publish({grip: next_value})
 
     async def update_async(
@@ -62,6 +76,21 @@ class MultiAtomValueTap(BaseTap):
     def produce(self, *, dest_context=None) -> None:
         """Publish current values to all or one destination context."""
         self.publish(self._values, dest_context=dest_context)
+
+    def get_persisted_grip_values(self) -> dict[Grip[Any], Any]:
+        """Return JSON-persistable value grips owned by this tap."""
+        return {
+            grip: value
+            for grip, value in self._values.items()
+            if _is_json_persistable(value)
+        }
+
+    def restore_persisted_grip_value(self, grip: Grip[Any], value: Any) -> bool:
+        """Restore one persisted grip value back into this tap."""
+        if grip not in self._values:
+            return False
+        MultiAtomValueTap.set(self, grip, value)
+        return True
 
 
 @dataclass(init=False, eq=False)

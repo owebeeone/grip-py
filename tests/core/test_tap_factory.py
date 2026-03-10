@@ -36,7 +36,7 @@ def test_register_tap_factory_builds_and_publishes() -> None:
     factory = CountingFactory(provides=(out,), value=7)
     grok.main_home_context.register_tap(factory)
 
-    ctx = grok.main_presentation_context.create_child()
+    ctx = grok.main_presentation_context.create_child("ctx_1")
     drip = grok.query(out, ctx)
 
     assert drip.get() == 7
@@ -49,7 +49,7 @@ def test_delta_add_remove_with_factory_key_and_producer_tap_fallback() -> None:
     grok = Grok(registry)
 
     factory = CountingFactory(provides=(out,), value=42)
-    ctx = grok.main_presentation_context.create_child()
+    ctx = grok.main_presentation_context.create_child("ctx_2")
     drip = grok.query(out, ctx)
 
     add_delta = EvaluationDelta(

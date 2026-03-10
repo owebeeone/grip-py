@@ -16,7 +16,7 @@ def test_function_tap_handle_publishes_and_updates_state() -> None:
     handle_grip = registry.add("FnHandle", value_type=object)
     grok = Grok(registry)
 
-    ctx = grok.main_presentation_context.create_child()
+    ctx = grok.main_presentation_context.create_child("ctx_1")
     local_source = create_atom_value_tap(local, initial=3)
     ctx.register_tap(local_source)
 
@@ -69,7 +69,7 @@ def test_function_tap_compute_result_can_update_state_without_publishing_state_g
     )
     grok.main_home_context.register_tap(tap)
 
-    ctx = grok.main_presentation_context.create_child()
+    ctx = grok.main_presentation_context.create_child("ctx_2")
     out_drip = grok.query(out, ctx)
 
     assert out_drip.get() == 0

@@ -36,7 +36,7 @@ def test_async_tap_fetch_and_publish() -> None:
         tap = create_async_tap(provides=[out], fetcher=fetcher)
         grok.main_home_context.register_tap(tap)
 
-        ctx = grok.main_presentation_context.create_child()
+        ctx = grok.main_presentation_context.create_child("ctx_1")
         drip = grok.query(out, ctx)
 
         done = asyncio.Event()
@@ -59,8 +59,8 @@ def test_async_tap_destination_params_only_shares_request_by_request_key() -> No
         request_id = registry.add("RequestId", 0)
         grok = Grok(registry)
 
-        c1 = grok.main_presentation_context.create_child()
-        c2 = grok.main_presentation_context.create_child()
+        c1 = grok.main_presentation_context.create_child("ctx_2")
+        c2 = grok.main_presentation_context.create_child("ctx_3")
         c1_source = create_atom_value_tap(request_id, initial=1)
         c2_source = create_atom_value_tap(request_id, initial=1)
         c1.register_tap(c1_source)
@@ -101,8 +101,8 @@ def test_async_tap_home_params_only_recomputes_and_shares() -> None:
         home_source = create_atom_value_tap(home, initial=3)
         grok.main_home_context.register_tap(home_source)
 
-        c1 = grok.main_presentation_context.create_child()
-        c2 = grok.main_presentation_context.create_child()
+        c1 = grok.main_presentation_context.create_child("ctx_4")
+        c2 = grok.main_presentation_context.create_child("ctx_5")
 
         fetch_count = 0
 
@@ -146,8 +146,8 @@ def test_async_tap_combined_home_and_destination_params() -> None:
         home_source = create_atom_value_tap(home, initial=100)
         grok.main_home_context.register_tap(home_source)
 
-        c1 = grok.main_presentation_context.create_child()
-        c2 = grok.main_presentation_context.create_child()
+        c1 = grok.main_presentation_context.create_child("ctx_6")
+        c2 = grok.main_presentation_context.create_child("ctx_7")
         c1_local = create_atom_value_tap(local, initial=1)
         c2_local = create_atom_value_tap(local, initial=2)
         c1.register_tap(c1_local)
@@ -201,7 +201,7 @@ def test_async_tap_cache_ttl_reuses_result_before_expiry() -> None:
         request_id = registry.add("RequestId", 0)
         grok = Grok(registry)
 
-        ctx = grok.main_presentation_context.create_child()
+        ctx = grok.main_presentation_context.create_child("ctx_8")
         req_source = create_atom_value_tap(request_id, initial=1)
         ctx.register_tap(req_source)
 
@@ -246,7 +246,7 @@ def test_async_tap_latest_only_drops_stale_completion() -> None:
         seq = registry.add("Seq", 0)
         grok = Grok(registry)
 
-        ctx = grok.main_presentation_context.create_child()
+        ctx = grok.main_presentation_context.create_child("ctx_9")
         seq_source = create_atom_value_tap(seq, initial=1)
         ctx.register_tap(seq_source)
 

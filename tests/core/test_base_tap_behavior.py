@@ -69,8 +69,8 @@ def test_destination_param_change_recomputes_only_affected_destination():
     dest_param = registry.add("DestParam", 0)
     grok = Grok(registry)
 
-    c1 = grok.main_presentation_context.create_child()
-    c2 = grok.main_presentation_context.create_child()
+    c1 = grok.main_presentation_context.create_child("ctx_1")
+    c2 = grok.main_presentation_context.create_child("ctx_2")
 
     c1_source = create_atom_value_tap(dest_param, initial=10)
     c2_source = create_atom_value_tap(dest_param, initial=20)
@@ -107,8 +107,8 @@ def test_home_param_change_recomputes_all_destinations():
     tap = ParamEchoTap(output=out, home_param=home_param)
     grok.main_home_context.register_tap(tap)
 
-    c1 = grok.main_presentation_context.create_child()
-    c2 = grok.main_presentation_context.create_child()
+    c1 = grok.main_presentation_context.create_child("ctx_3")
+    c2 = grok.main_presentation_context.create_child("ctx_4")
     d1 = grok.query(out, c1)
     d2 = grok.query(out, c2)
     assert d1.get() == 7

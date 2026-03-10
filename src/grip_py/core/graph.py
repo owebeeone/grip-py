@@ -227,6 +227,10 @@ class GripContextNode:
     def get_context(self) -> GripContext | None:
         return self.context_ref()
 
+    def rebind_context(self, ctx: GripContext) -> None:
+        self.context_ref = weakref.ref(ctx)
+        self.touch()
+
     def get_parent_nodes(self) -> list[GripContextNode]:
         return [p.node for p in self.parents]
 
@@ -401,6 +405,8 @@ class GrokGraph:
             for parent in ctx.get_parents():
                 parent_node = self.ensure_node(parent.ctx)
                 node.add_parent(parent_node, parent.priority)
+        else:
+            node.rebind_context(ctx)
         node.touch()
         return node
 

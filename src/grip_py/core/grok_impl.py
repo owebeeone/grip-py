@@ -12,6 +12,7 @@ from .drip import Drip
 from .grip import Grip, GripRegistry
 from .graph import GripContextNode, GrokGraph
 from .interfaces import Resolver, Tap
+from .local_persistence import GrokLocalPersistence, LocalPersistenceAttachOptions
 from .query_evaluator import EvaluationDelta
 from .task_queue import TaskHandleContainer, TaskQueue
 from .tap_resolver import SimpleResolver
@@ -36,6 +37,8 @@ class GrokImpl:
     _task_queue: TaskQueue
     _closed: bool
     _origin_mutation_seq: int
+    _local_persistence: GrokLocalPersistence | None
+    _local_persistence_suppressed: bool
     resolver: Resolver
     root_context: GripContext
     main_home_context: GripContext
@@ -48,6 +51,8 @@ class GrokImpl:
         self._task_queue = TaskQueue(auto_flush=True, loop=self._async_loop)
         self._closed = False
         self._origin_mutation_seq = 0
+        self._local_persistence = None
+        self._local_persistence_suppressed = False
         self.resolver = SimpleResolver(self)
 
         self.root_context = GripContext(self, "root")
@@ -71,6 +76,56 @@ class GrokImpl:
     def get_last_origin_mutation_seq(self) -> int:
         """Return the last allocated local origin mutation sequence."""
         return self._origin_mutation_seq
+
+    def run_with_local_persistence_suppressed(self, callback):
+        """Run a callback while suppressing local persistence dirty marks."""
+        previous = self._local_persistence_suppressed
+        self._local_persistence_suppressed = True
+        try:
+            return callback()
+        finally:
+            self._local_persistence_suppressed = previous
+
+    def note_local_persistence_dirty(self) -> None:
+        """Mark the attached local persistence session dirty when enabled."""
+        if self._local_persistence_suppressed:
+            return
+        if self._local_persistence is not None:
+            self._local_persistence.mark_dirty()
+
+    def attach_local_persistence(
+        self,
+        *,
+        session_id: str,
+        store,
+        title: str | None = None,
+        flush_delay_ms: int = 250,
+    ) -> None:
+        """Attach a local persistence store and hydrate the current runtime."""
+        if self._local_persistence is not None:
+            self._local_persistence.detach()
+        local_persistence = GrokLocalPersistence(
+            self,
+            LocalPersistenceAttachOptions(
+                session_id=session_id,
+                title=title,
+                store=store,
+                flush_delay_ms=flush_delay_ms,
+            ),
+        )
+        self._local_persistence = local_persistence
+        local_persistence.attach()
+
+    def detach_local_persistence(self) -> None:
+        """Detach the active local persistence store."""
+        if self._local_persistence is not None:
+            self._local_persistence.detach()
+            self._local_persistence = None
+
+    def flush_local_persistence(self) -> None:
+        """Flush the current local persistence snapshot immediately."""
+        if self._local_persistence is not None:
+            self._local_persistence.flush_now()
 
     def has_cycle(self, new_node: GripContextNode) -> bool:
         """Return ``True`` if the graph currently contains a cycle."""
@@ -114,13 +169,19 @@ class GrokImpl:
         self,
         parent: GripContext | None = None,
         priority: int = 0,
-        context_id: str | None = None,
+        *,
+        context_id: str,
     ) -> GripContext:
         """Create a context optionally parented to an existing context."""
         ctx = GripContext(self, context_id)
         if parent is not None:
             ctx.add_parent(parent, priority)
         return ctx
+
+    def get_context_by_id(self, context_id: str) -> GripContext | None:
+        """Return a live context by deterministic id when present."""
+        node = self._graph.get_node_by_id(context_id)
+        return node.get_context() if node is not None else None
 
     def unregister_tap(self, tap: Tap) -> None:
         """Detach a registered tap from the resolver."""
@@ -174,6 +235,10 @@ class GrokImpl:
         if self._closed:
             return
         self._closed = True
+        if self._local_persistence is not None:
+            self._local_persistence.flush_now()
+            self._local_persistence.detach()
+            self._local_persistence = None
 
         for node in tuple(self._graph.snapshot().values()):
             for record in set(node.producer_by_tap.values()):

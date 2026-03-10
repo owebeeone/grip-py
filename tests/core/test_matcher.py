@@ -47,7 +47,7 @@ def test_tap_matcher_switches_taps_based_on_home_query_values() -> None:
     grok = Grok(registry)
 
     home = grok.main_home_context
-    presentation = grok.main_presentation_context.create_child()
+    presentation = grok.main_presentation_context.create_child("ctx_1")
 
     selector_source = create_atom_value_tap(selector, initial="none")
     home.register_tap(selector_source)
@@ -88,7 +88,7 @@ def test_tap_matcher_supports_factory_bindings() -> None:
     grok = Grok(registry)
 
     home = grok.main_home_context
-    presentation = grok.main_presentation_context.create_child()
+    presentation = grok.main_presentation_context.create_child("ctx_2")
 
     selector_source = create_atom_value_tap(selector, initial="none")
     home.register_tap(selector_source)

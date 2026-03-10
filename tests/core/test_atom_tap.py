@@ -13,7 +13,7 @@ def test_atom_tap_set_propagates_to_consumers():
     tap = create_atom_value_tap(out, initial=10)
     grok.main_home_context.register_tap(tap)
 
-    ctx = grok.main_presentation_context.create_child()
+    ctx = grok.main_presentation_context.create_child("ctx_1")
     drip = grok.query(out, ctx)
     assert drip.get() == 10
 
@@ -28,7 +28,7 @@ def test_atom_tap_update_uses_previous_value():
 
     tap = create_atom_value_tap(out, initial=10)
     grok.main_home_context.register_tap(tap)
-    ctx = grok.main_presentation_context.create_child()
+    ctx = grok.main_presentation_context.create_child("ctx_2")
     drip = grok.query(out, ctx)
     assert drip.get() == 10
 
@@ -46,7 +46,7 @@ def test_multi_atom_tap_update_updates_single_grip():
     tap = create_multi_atom_value_tap({a: 10, b: 20})
     grok.main_home_context.register_tap(tap)
 
-    ctx = grok.main_presentation_context.create_child()
+    ctx = grok.main_presentation_context.create_child("ctx_3")
     da = grok.query(a, ctx)
     db = grok.query(b, ctx)
     assert da.get() == 10
@@ -67,7 +67,7 @@ def test_atom_tap_update_async_applies_result():
 
         tap = create_atom_value_tap(out, initial=5)
         grok.main_home_context.register_tap(tap)
-        ctx = grok.main_presentation_context.create_child()
+        ctx = grok.main_presentation_context.create_child("ctx_4")
         drip = grok.query(out, ctx)
 
         async def updater(prev: int) -> int:

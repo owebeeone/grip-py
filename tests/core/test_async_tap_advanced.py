@@ -48,7 +48,7 @@ def test_async_tap_publishes_state_and_controller_grips() -> None:
         controller_grip = registry.add("AsyncController", value_type=object)
         grok = Grok(registry)
 
-        ctx = grok.main_presentation_context.create_child()
+        ctx = grok.main_presentation_context.create_child("ctx_1")
         local_source = create_atom_value_tap(local, initial=1)
         ctx.register_tap(local_source)
 
@@ -112,7 +112,7 @@ def test_async_tap_retry_backoff_recovers_after_error() -> None:
         )
         grok.main_home_context.register_tap(tap)
 
-        ctx = grok.main_presentation_context.create_child()
+        ctx = grok.main_presentation_context.create_child("ctx_2")
         out_drip = grok.query(out, ctx)
         state_drip = grok.query(state_grip, ctx)
 
@@ -130,7 +130,7 @@ def test_async_tap_cleanup_delay_reuses_inflight_after_detach_and_reattach() -> 
         request_id = registry.add("RequestId", 0)
         grok = Grok(registry)
 
-        ctx = grok.main_presentation_context.create_child()
+        ctx = grok.main_presentation_context.create_child("ctx_3")
         req_source = create_atom_value_tap(request_id, initial=1)
         ctx.register_tap(req_source)
 
@@ -187,7 +187,7 @@ def test_async_tap_refresh_before_expiry_triggers_background_refetch() -> None:
         )
         grok.main_home_context.register_tap(tap)
 
-        ctx = grok.main_presentation_context.create_child()
+        ctx = grok.main_presentation_context.create_child("ctx_4")
         drip = grok.query(out, ctx)
         await _wait_for_value(drip, 1)
 
@@ -224,7 +224,7 @@ def test_async_tap_stale_with_error_preserves_data_when_keep_stale_enabled() -> 
         )
         grok.main_home_context.register_tap(tap)
 
-        ctx = grok.main_presentation_context.create_child()
+        ctx = grok.main_presentation_context.create_child("ctx_5")
         out_drip = grok.query(out, ctx)
         state_drip = grok.query(state_grip, ctx)
         controller_drip = grok.query(controller_grip, ctx)
@@ -263,7 +263,7 @@ def test_async_tap_refresh_resets_value_when_keep_stale_disabled() -> None:
         )
         grok.main_home_context.register_tap(tap)
 
-        ctx = grok.main_presentation_context.create_child()
+        ctx = grok.main_presentation_context.create_child("ctx_6")
         out_drip = grok.query(out, ctx)
         state_drip = grok.query(state_grip, ctx)
         controller_drip = grok.query(controller_grip, ctx)

@@ -7,8 +7,8 @@ def test_gc_cleanup_removes_stale_children_references():
     grok = Grok(registry)
 
     main = grok.main_presentation_context
-    child1 = main.create_child()
-    child2 = main.create_child()
+    child1 = main.create_child("ctx_1")
+    child2 = main.create_child("ctx_2")
 
     main_node = main.get_context_node()
     graph = grok._graph  # internal test access
@@ -34,7 +34,7 @@ def test_snapshot_sanity_detects_orphaned_node_refs():
     grok = Grok(registry)
 
     main = grok.main_presentation_context
-    child = main.create_child()
+    child = main.create_child("ctx_3")
 
     graph = grok._graph
     main_node = main.get_context_node()

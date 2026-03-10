@@ -93,8 +93,11 @@ class BaseTap(ABC):
         for grip in self.provides:
             node.record_producer(grip, self._producer)
         self._bind_home_param_subscriptions()
+        self._engine.note_local_persistence_dirty()
 
     def on_detach(self) -> None:
+        if self._engine is not None:
+            self._engine.note_local_persistence_dirty()
         self._clear_home_param_subscriptions()
         self._clear_destination_param_subscriptions()
         self._home_context = None

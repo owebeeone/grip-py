@@ -41,7 +41,7 @@ def test_async_tap_history_size_limits_entries() -> None:
         )
         grok.main_home_context.register_tap(tap)
 
-        ctx = grok.main_presentation_context.create_child()
+        ctx = grok.main_presentation_context.create_child("ctx_1")
         out_drip = grok.query(out, ctx)
         state_drip = grok.query(state_grip, ctx)
         controller = grok.query(controller_grip, ctx).get()
@@ -84,7 +84,7 @@ def test_async_tap_history_size_zero_disables_history() -> None:
         )
         grok.main_home_context.register_tap(tap)
 
-        ctx = grok.main_presentation_context.create_child()
+        ctx = grok.main_presentation_context.create_child("ctx_2")
         grok.query(out, ctx)
         state_drip = grok.query(state_grip, ctx)
         controller = grok.query(controller_grip, ctx).get()

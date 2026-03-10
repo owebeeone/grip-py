@@ -17,7 +17,7 @@ def test_graph_dump_includes_contexts_taps_and_drips() -> None:
     grok.main_home_context.register_tap(home_source)
     grok.main_home_context.register_tap(out_source)
 
-    ctx = grok.main_presentation_context.create_child()
+    ctx = grok.main_presentation_context.create_child("ctx_1")
     drip = grok.query(out, ctx)
     assert drip.get() == 7
 
@@ -41,7 +41,7 @@ def test_graph_dump_key_registry_is_stable_across_dumps() -> None:
     grok = Grok(registry)
 
     grok.main_home_context.register_tap(create_atom_value_tap(out, initial=1))
-    ctx = grok.main_presentation_context.create_child()
+    ctx = grok.main_presentation_context.create_child("ctx_2")
     grok.query(out, ctx)
 
     keys = GraphDumpKeyRegistry()
