@@ -8,6 +8,9 @@ This file defines repository-specific coding instructions for `grip-py`.
 - When a class is not a good dataclass candidate (for example, protocol classes or classes requiring highly custom initialization/slots behavior), keep it as a normal class and document that choice in code review notes or PR description.
 - Keep type annotations complete and precise so IDE inference remains strong.
 
+## Paths in version control
+- Do not store absolute filesystem paths in any committed file; use paths relative to this repository (the `grip-py` submodule root). If a path would cross into a parent monorepo checkout, truncate to the closest submodule root instead of embedding machine-specific prefixes.
+
 ## Development Process (TDD)
 Use a strict red/green/refactor workflow for all behavior changes.
 
