@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import random
+import weakref
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from .drip import Drip
 from .grip import Grip
@@ -29,11 +32,15 @@ class GripContext:
     _grok: Grok
     id: str
     _context_node: GripContextNode
+    _named_child_contexts: dict[str, weakref.ReferenceType[GripContext]]
+    _named_matching_contexts: dict[str, weakref.ReferenceType[Any]]
 
     def __init__(self, engine: Grok, context_id: str | None = None):
         self._grok = engine
         self.id = context_id or f"ctx_{random.randint(1, 2_000_000_000):x}"
         self._context_node = engine.ensure_node(self)
+        self._named_child_contexts = {}
+        self._named_matching_contexts = {}
 
     def get_grip_consumer_context(self) -> GripContext:
         """Return this context as the consumer-side context."""
@@ -99,11 +106,83 @@ class GripContext:
         self._grok.resolver.unlink_parent(self, parent_context)
         return self
 
-    def create_child(self, *, priority: int = 0) -> GripContext:
+    def create_child(
+        self,
+        *,
+        priority: int = 0,
+        context_id: str | None = None,
+    ) -> GripContext:
         """Create a new child context linked to this context."""
-        child = GripContext(self._grok)
+        child = GripContext(self._grok, context_id)
         child.add_parent(self, priority)
         return child
+
+    def get_or_create_child_context(
+        self,
+        key: str,
+        init: Callable[[GripContext], None] | None = None,
+        *,
+        priority: int = 0,
+        context_id: str | None = None,
+    ) -> GripContext:
+        """Return a live named child context or create and initialize one."""
+        existing_ref = self._named_child_contexts.get(key)
+        existing = existing_ref() if existing_ref is not None else None
+        if existing is not None:
+            return existing
+        if existing_ref is not None:
+            self._named_child_contexts.pop(key, None)
+
+        child = self.create_child(
+            priority=priority,
+            context_id=context_id or _make_context_child_id(self.id, key),
+        )
+        self._named_child_contexts[key] = weakref.ref(
+            child,
+            lambda _ref, cache=self._named_child_contexts, cache_key=key: cache.pop(cache_key, None),
+        )
+        if init is not None:
+            init(child)
+        return child
+
+    def get_or_create_matching_context(
+        self,
+        key: str,
+        init: Callable[[Any], None] | None = None,
+        *,
+        source_id: str | None = None,
+        presentation_id: str | None = None,
+        source_priority: int = 0,
+        presentation_priority: int = 0,
+    ):
+        """Return a live named matching context or create and initialize one."""
+        existing_ref = self._named_matching_contexts.get(key)
+        existing = existing_ref() if existing_ref is not None else None
+        if existing is not None:
+            return existing
+        if existing_ref is not None:
+            self._named_matching_contexts.pop(key, None)
+
+        from .matcher import MatchingContext
+
+        home = self.get_or_create_child_context(
+            key,
+            priority=source_priority,
+            context_id=source_id or _make_context_child_id(self.id, key, "source"),
+        )
+        presentation = home.get_or_create_child_context(
+            "presentation",
+            priority=presentation_priority,
+            context_id=presentation_id or _make_context_child_id(self.id, key, "presentation"),
+        )
+        matching = MatchingContext(home, presentation)
+        self._named_matching_contexts[key] = weakref.ref(
+            matching,
+            lambda _ref, cache=self._named_matching_contexts, cache_key=key: cache.pop(cache_key, None),
+        )
+        if init is not None:
+            init(matching)
+        return matching
 
     def get_live_drip_for_grip(self, grip: Grip):
         """Return a live consumer drip for ``grip`` when present."""
@@ -132,3 +211,10 @@ class GripContext:
     def get_context_node(self) -> GripContextNode:
         """Return the internal context node (public alias)."""
         return self._context_node
+
+
+def _make_context_child_id(parent_id: str, key: str, suffix: str | None = None) -> str:
+    base = f"{parent_id}/{key}"
+    if suffix:
+        return f"{base}/{suffix}"
+    return base

@@ -101,7 +101,7 @@ class TapMatcher:
         )
 
 
-@dataclass(slots=True, init=False)
+@dataclass(init=False)
 class MatchingContext:
     """Convenience wrapper combining home/presentation contexts and a matcher."""
 
