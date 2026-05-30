@@ -153,9 +153,8 @@ class AsyncStreamMultiTap(BaseTap):
         self.produce()
 
     def _sync_destination(self, ctx: GripContext) -> None:
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
+        loop = self._get_runtime_loop()
+        if loop is None:
             return
 
         destination_id = ctx.id
@@ -291,9 +290,8 @@ class AsyncStreamMultiTap(BaseTap):
         if self._cleanup_delay_ms <= 0:
             self._close_stream(stream)
             return
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
+        loop = stream.loop or self._get_runtime_loop()
+        if loop is None:
             self._close_stream(stream)
             return
 
@@ -331,9 +329,8 @@ class AsyncStreamMultiTap(BaseTap):
             return
         if retry.max_retries is not None and stream.retry_attempt >= max(0, retry.max_retries):
             return
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
+        loop = stream.loop or self._get_runtime_loop()
+        if loop is None:
             return
 
         delay_ms = self._retry_delay_ms(stream.retry_attempt, retry)
@@ -355,9 +352,8 @@ class AsyncStreamMultiTap(BaseTap):
         retry = self._retry
         if retry is None or stream.retry_attempt == 0 or stream.stable_reset_task is not None:
             return
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
+        loop = stream.loop or self._get_runtime_loop()
+        if loop is None:
             return
 
         async def reset_attempt() -> None:
@@ -396,6 +392,16 @@ class AsyncStreamMultiTap(BaseTap):
                 task_loop.call_soon_threadsafe(task.cancel)
             else:
                 task.cancel()
+
+    def _get_runtime_loop(self) -> asyncio.AbstractEventLoop | None:
+        try:
+            return asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        if self._engine is None:
+            return None
+        loop = self._engine.get_async_loop()
+        return loop if loop.is_running() else None
 
     @staticmethod
     def _set_cancel_event(stream: _StreamState) -> None:
