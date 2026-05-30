@@ -10,6 +10,12 @@ from .async_tap import (
     StateHistoryEntry,
     create_async_tap,
 )
+from .async_stream_tap import (
+    AsyncStreamMultiTap,
+    AsyncStreamRetryConfig,
+    AsyncStreamTapParams,
+    create_async_stream_multi_tap,
+)
 from .async_state_helpers import (
     get_data_retrieved_at,
     get_error,
@@ -95,6 +101,9 @@ __all__ = [
     "FunctionTapHandle",
     "FunctionTapComputeArgs",
     "AsyncTap",
+    "AsyncStreamMultiTap",
+    "AsyncStreamTapParams",
+    "AsyncStreamRetryConfig",
     "AsyncTapParams",
     "RequestState",
     "StateHistoryEntry",
@@ -144,6 +153,7 @@ __all__ = [
     "create_multi_atom_value_tap",
     "create_function_tap",
     "create_async_tap",
+    "create_async_stream_multi_tap",
     "use_grip",
     "watch_drip",
 ]
