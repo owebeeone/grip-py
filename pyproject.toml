@@ -24,6 +24,9 @@ dependencies = []
 Homepage = "https://github.com/owebeeone/grip-py"
 "Bug Tracker" = "https://github.com/owebeeone/grip-py/issues"
 
+[tool.uv]
+exclude-newer = "1 week"
+
 [tool.hatch.envs.test]
 dependencies = [
     "pytest>=7.0.0",
